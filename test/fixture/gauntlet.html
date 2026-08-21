@@ -1,0 +1,42 @@
+<!doctype html><meta charset="utf-8"><title>모달 체인 테스트</title>
+<style>body{font:14px sans-serif;padding:24px}
+.m{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
+.b{background:#fff;padding:24px;border-radius:8px;min-width:320px}
+button{padding:8px 16px;margin:4px;font-size:14px}</style>
+<h2>좌석 조회 결과</h2>
+<div id="list"><button id="seat">프레스티지 PR 1석 · KE927 ICN→FCO</button></div>
+<div id="stage"></div>
+<script>
+// 실제 예매 흐름을 흉내낸 모달 체인: 좌석 클릭 -> 확인 4번 -> 체크박스 -> 완료
+var steps = [
+  {t:'유의사항 안내', b:['취소','확인']},
+  {t:'마일리지 공제 안내', b:['이전','다음 »']},
+  {t:'약관 동의', b:['닫기','전체 동의'], cb:true},
+  {t:'여정 최종 확인', b:['다시 검색','계속하기']}
+];
+var i = 0, log = [];
+function show(){
+  if(i >= steps.length){
+    document.getElementById('stage').innerHTML =
+      '<h3>예약이 완료되었습니다</h3><p>예약번호: TEST1234</p>';
+    window.__done = log; return;
+  }
+  var s = steps[i++];
+  var html = '<div class="m"><div class="b"><h3>'+s.t+'</h3>';
+  if(s.cb) html += '<label><input type="checkbox" id="agree"> 위 약관에 동의합니다</label><br>';
+  s.b.forEach(function(x){ html += '<button data-l="'+x+'">'+x+'</button>'; });
+  html += '</div></div>';
+  var st = document.getElementById('stage');
+  st.innerHTML = html;
+  st.querySelectorAll('button').forEach(function(btn){
+    btn.onclick = function(){
+      var l = btn.dataset.l;
+      log.push(l);
+      if(/취소|닫기|이전|다시/.test(l)){ window.__aborted = l; st.innerHTML='<h3>중단됨: '+l+'</h3>'; return; }
+      if(s.cb && !document.getElementById('agree').checked){ window.__unchecked = true; }
+      setTimeout(show, 60);   // 실제처럼 약간의 렌더 지연
+    };
+  });
+}
+document.getElementById('seat').onclick = function(){ window.__seatClicked = 1; show(); };
+</script>

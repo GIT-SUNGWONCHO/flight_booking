@@ -1,0 +1,114 @@
+<!doctype html>
+<meta charset="utf-8"><title>예매 흐름 시뮬레이터</title>
+<style>
+ body{font:14px sans-serif;padding:20px;max-width:760px}
+ button{padding:8px 14px;margin:4px;font-size:14px;cursor:pointer}
+ .date{min-width:64px}
+ .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center}
+ .box{background:#fff;padding:20px;border-radius:8px;width:380px}
+ .agree{border:1px solid #333;background:#fff}
+ .agree[aria-pressed="true"]{background:#222;color:#fff}
+ h3{margin:6px 0}
+</style>
+<body>
+<!-- 실제 흐름을 흉내낸다. 페이지 이동이 실제로 일어나므로 재생 이어붙이기까지 검증된다.
+     1) 캘린더에서 새로 열린 날짜 -> 항공편 검색
+     2) 좌석 선택 -> 다음
+     3) 승객정보 확인 -> 위험품 팝업(아래로 스크롤 x2 -> 확인) -> 동의 -> 결제하기 -->
+<div id="app"></div>
+<script>
+var P = new URLSearchParams(location.search);
+var page = P.get('p') || 'cal';
+var app = document.getElementById('app');
+function go(p){ location.search = '?p=' + p; }
+function mark(k){ try{ sessionStorage.setItem(k,'1'); }catch(e){} window['__'+k]=true; }
+function got(k){ try{ return sessionStorage.getItem(k)==='1'; }catch(e){ return false; } }
+
+if (page === 'cal') {
+  var days = ['10(화)','11(수)','12(목)','13(금)','14(토)','15(일)','16(월)'];
+  app.innerHTML = '<h3>가는 날 선택</h3>' +
+    days.map(function(d,i){
+      return '<button class="date" data-i="'+i+'">'+d+'</button>';
+    }).join('') +
+    '<div><button id="search">항공편 검색</button></div>' +
+    '<p id="picked">선택: 없음</p>';
+  app.querySelectorAll('.date').forEach(function(b){
+    b.onclick = function(){
+      document.getElementById('picked').textContent = '선택: ' + b.textContent;
+      mark('datePicked'); window.__pickedIndex = b.dataset.i;
+      try{ sessionStorage.setItem('pickedIndex', b.dataset.i); }catch(e){}
+    };
+  });
+  document.getElementById('search').onclick = function(){
+    if(!got('datePicked')){ window.__searchedWithoutDate = true; }
+    go('result');
+  };
+
+} else if (page === 'result') {
+  app.innerHTML = '<h3>항공편 선택</h3>' +
+    '<p>선택한 날짜 index: ' + (sessionStorage.getItem('pickedIndex')||'없음') + '</p>' +
+    '<button id="seat">일반석 E · KE927</button>' +
+    '<button id="seat-p" disabled>프레스티지 P · 매진</button>' +
+    '<div><button id="next">다음</button></div>';
+  document.getElementById('seat').onclick = function(){ mark('seatPicked'); this.style.outline='3px solid #06c'; };
+  document.getElementById('next').onclick = function(){
+    if(!got('seatPicked')){ window.__nextWithoutSeat = true; }
+    go('info');
+  };
+
+} else {
+  // 정보 입력 -> 위험품 팝업 -> 동의 -> 결제
+  app.innerHTML =
+    '<h3>탑승객 정보</h3><p>홍길동 / 1990-01-01 (이미 입력됨)</p>' +
+    '<button id="pax">확인</button>' +
+    '<div id="after" style="display:none">' +
+      '<h3>확인 및 동의</h3>' +
+      '<button class="agree" id="ag1" aria-pressed="false">✓ 동의</button>' +
+      '<button class="agree" id="ag2" aria-pressed="true">✓ 동의</button>' +
+      '<h3>결제 수단</h3>' +
+      '<button id="npay">네이버페이</button>' +
+      '<div><button id="pay">결제하기</button></div>' +
+    '</div>' +
+    '<div id="stage"></div>';
+
+  var scrolls = 0;
+  document.getElementById('pax').onclick = function(){
+    // 위험품 안내: 아래로 스크롤을 두 번 눌러야 확인이 나타난다
+    // 실제와 동일하게: 버튼 하나가 두 번 눌리면 라벨이 '확인' 으로 바뀐다
+    document.getElementById('stage').innerHTML =
+      '<div class="modal"><div class="box"><h3>위험물 안내</h3>' +
+      '<p>기내 반입 제한 물품 안내...</p>' +
+      '<button id="scroll">아래로 스크롤</button>' +
+      '<button id="x">닫기</button></div></div>';
+    wire();
+  };
+  function wire(){
+    var sc = document.getElementById('scroll');
+    document.getElementById('x').onclick = function(){ window.__closedDanger = true; };
+    sc.onclick = function(){
+      if (sc.textContent === '확인') {          // 확인 단계
+        if (scrolls < 2) { window.__okBeforeScroll = true; }
+        document.getElementById('stage').innerHTML = '';
+        document.getElementById('after').style.display = '';
+        mark('paxDone');
+        return;
+      }
+      scrolls++; window.__scrolls = scrolls;
+      if (scrolls >= 2) sc.textContent = '확인';  // 같은 엘리먼트, 라벨만 교체
+    };
+  }
+  document.getElementById('ag1').onclick = function(){
+    this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    window.__ag1 = this.getAttribute('aria-pressed');
+  };
+  document.getElementById('ag2').onclick = function(){
+    // 이미 동의된 버튼. 다시 누르면 동의가 풀린다 = 사고
+    this.setAttribute('aria-pressed', this.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    window.__ag2 = this.getAttribute('aria-pressed');
+    if (this.getAttribute('aria-pressed') === 'false') window.__brokeAgreement = true;
+  };
+  document.getElementById('npay').onclick = function(){ window.__npay = true; this.style.outline='3px solid #06c'; };
+  document.getElementById('pay').onclick = function(){ window.__paid = true; document.body.insertAdjacentHTML('beforeend','<h3>예약번호: TEST1234</h3>'); };
+}
+</script>
+</body>
