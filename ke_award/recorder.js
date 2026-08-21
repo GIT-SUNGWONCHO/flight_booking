@@ -54,6 +54,15 @@
   }
   load();
 
+  /* 빌드 시 steps.json 에서 구워 넣은 기본 단계.
+   * 이 브라우저에 녹화본이 없을 때만 쓴다 (직접 녹화한 게 항상 우선). */
+  function baked() { return (W.KE_STEPS_BAKED || window.KE_STEPS_BAKED || []); }
+  if (!S.steps.length && baked().length) {
+    S.steps = JSON.parse(JSON.stringify(baked()));
+    S.idx = 0;
+    save();
+  }
+
   var listeners = [];
   function emit() {
     for (var i = 0; i < listeners.length; i++) {
@@ -70,7 +79,7 @@
   function onClick(ev) {
     if (!S.recording) return;
     var el = ev.target;
-    if (el.closest && el.closest('#ke-hud')) return;         // 우리 패널은 기록하지 않음
+    if (el.closest && el.closest('#ke-hud, #ke-editor, #ke-export')) return;  // 우리 UI 는 기록 안 함
     var t = el.closest ? (el.closest(U.CLICKABLE) || el) : el;
 
     var step = {
@@ -164,9 +173,84 @@
   setInterval(tick, 60);
   new MutationObserver(tick).observe(document, { childList: true, subtree: true });
 
+  /** ke_award/steps.json 에 그대로 붙여넣을 수 있는 형태로 뽑는다. */
+  function exportJson() {
+    return JSON.stringify({
+      note: '패널 [내보내기] 로 뽑은 예매 단계. ke_award/steps.json 에 덮어쓰고 node build.mjs 하면 스크립트에 내장된다.',
+      recordedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      steps: S.steps
+    }, null, 2);
+  }
+
+  /** 화면에 텍스트박스를 띄워 복사시킨다. 클립보드 API 가 막힌 환경도 있어서 폴백이 필요. */
+  function showExport() {
+    var json = exportJson();
+    try { navigator.clipboard.writeText(json); } catch (e) {}
+    var old = document.getElementById('ke-export');
+    if (old) old.remove();
+    var box = document.createElement('div');
+    box.id = 'ke-export';
+    box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);' +
+                        'display:flex;align-items:center;justify-content:center';
+    box.innerHTML =
+      '<div style="background:#fff;padding:16px;border-radius:8px;width:min(680px,90vw)">' +
+      '<b style="font:13px sans-serif">ke_award/steps.json 에 덮어쓰고 <code>node build.mjs</code></b>' +
+      '<textarea id="ke-export-ta" style="width:100%;height:50vh;margin-top:8px;font:11px Consolas,monospace"></textarea>' +
+      '<button id="ke-export-close" style="margin-top:8px;padding:6px 12px">닫기</button></div>';
+    document.documentElement.appendChild(box);
+    var ta = box.querySelector('#ke-export-ta');
+    ta.value = json;
+    ta.select();
+    box.querySelector('#ke-export-close').onclick = function () { box.remove(); };
+    console.log(json);
+    log('내보내기 - 클립보드에 복사했습니다 (' + S.steps.length + '단계)');
+  }
+
+  // ---- 단계 편집 ----------------------------------------------------------
+  function removeStep(i) {
+    if (i < 0 || i >= S.steps.length) return;
+    var gone = S.steps.splice(i, 1)[0];
+    if (S.idx > i) S.idx--;
+    save(); log('삭제: ' + (gone.text || gone.sel).slice(0, 24));
+  }
+  function moveStep(i, dir) {
+    var j = i + dir;
+    if (i < 0 || i >= S.steps.length || j < 0 || j >= S.steps.length) return;
+    var t = S.steps[i]; S.steps[i] = S.steps[j]; S.steps[j] = t;
+    save(); emit();
+  }
+  function insertAt(i, step) {
+    i = Math.max(0, Math.min(i, S.steps.length));
+    S.steps.splice(i, 0, step);
+    if (S.idx > i) S.idx++;
+    save(); log('추가: ' + (step.text || step.sel).slice(0, 24) + ' (' + (i + 1) + '번째)');
+  }
+  function setStep(i, patch) {
+    if (!S.steps[i]) return;
+    for (var k in patch) S.steps[i][k] = patch[k];
+    save(); emit();
+  }
+  function importJson(text) {
+    var d = JSON.parse(text);
+    var arr = Array.isArray(d) ? d : d.steps;
+    if (!Array.isArray(arr)) throw new Error('steps 배열이 없습니다');
+    for (var i = 0; i < arr.length; i++) {
+      if (!arr[i] || (!arr[i].sel && !arr[i].text)) throw new Error((i + 1) + '번째에 sel/text 가 없습니다');
+    }
+    S.steps = arr; S.idx = 0; save();
+    log('불러오기 ' + arr.length + '단계');
+  }
+
   var API = {
     record: record, stop: stopRec, play: play, pause: pause,
     reset: reset, clear: clear, state: S, save: save,
+    exportJson: exportJson, showExport: showExport, importJson: importJson,
+    removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,
+    loadBaked: function () {
+      S.steps = JSON.parse(JSON.stringify(baked()));
+      S.idx = 0; save();
+      log('내장 단계 ' + S.steps.length + '개를 불러왔습니다');
+    },
     list: function () { console.table(S.steps); return S.steps; },
     onChange: function (fn) { listeners.push(fn); }
   };

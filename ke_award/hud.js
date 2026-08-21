@@ -426,6 +426,8 @@
       '<button id="ke-rec" style="background:#a0f">● 녹화</button>' +
       '<button id="ke-play" style="background:#06c">▶ 재생</button>' +
       '<button id="ke-clear" style="background:#888">삭제</button></div>' +
+      '<button id="ke-edit" style="background:#06c;width:100%">단계 편집</button>' +
+      '<button id="ke-export" style="background:#555;width:100%">내보내기 (steps.json 용)</button>' +
       '<div id="ke-rec-msg" style="font-size:11px;color:#606"></div>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
       '<label>정시 동작: <b id="ke-mode-label"></b></label>' +
@@ -475,6 +477,11 @@
         }
         renderRec();
       };
+      root.querySelector('#ke-edit').onclick = function () {
+        var E = W.KE_EDIT || window.KE_EDIT;
+        if (E) E.open(); else toast('편집기를 불러오지 못했습니다', true);
+      };
+      root.querySelector('#ke-export').onclick = function () { REC.showExport(); };
       root.querySelector('#ke-clear').onclick = function () {
         if (confirm('녹화된 단계를 모두 지울까요?')) { REC.clear(); renderRec(); }
       };

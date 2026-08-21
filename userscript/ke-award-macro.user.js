@@ -374,6 +374,21 @@ try {
 }
 
 
+// ---------- steps ----------
+try {
+(function () {
+  var S = [];
+  var W = window;
+  try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
+  try { W.KE_STEPS_BAKED = S; } catch (e) {}
+  if (W !== window) { try { window.KE_STEPS_BAKED = S; } catch (e) {} }
+  if (S.length) console.log('[KE] 내장 단계 ' + S.length + '개');
+})();
+} catch (e) {
+  console.error('[KE] steps 로드 실패:', e);
+}
+
+
 // ---------- recorder ----------
 try {
 /* ============================================================
@@ -432,6 +447,15 @@ try {
   }
   load();
 
+  /* 빌드 시 steps.json 에서 구워 넣은 기본 단계.
+   * 이 브라우저에 녹화본이 없을 때만 쓴다 (직접 녹화한 게 항상 우선). */
+  function baked() { return (W.KE_STEPS_BAKED || window.KE_STEPS_BAKED || []); }
+  if (!S.steps.length && baked().length) {
+    S.steps = JSON.parse(JSON.stringify(baked()));
+    S.idx = 0;
+    save();
+  }
+
   var listeners = [];
   function emit() {
     for (var i = 0; i < listeners.length; i++) {
@@ -448,7 +472,7 @@ try {
   function onClick(ev) {
     if (!S.recording) return;
     var el = ev.target;
-    if (el.closest && el.closest('#ke-hud')) return;         // 우리 패널은 기록하지 않음
+    if (el.closest && el.closest('#ke-hud, #ke-editor, #ke-export')) return;  // 우리 UI 는 기록 안 함
     var t = el.closest ? (el.closest(U.CLICKABLE) || el) : el;
 
     var step = {
@@ -542,9 +566,84 @@ try {
   setInterval(tick, 60);
   new MutationObserver(tick).observe(document, { childList: true, subtree: true });
 
+  /** ke_award/steps.json 에 그대로 붙여넣을 수 있는 형태로 뽑는다. */
+  function exportJson() {
+    return JSON.stringify({
+      note: '패널 [내보내기] 로 뽑은 예매 단계. ke_award/steps.json 에 덮어쓰고 node build.mjs 하면 스크립트에 내장된다.',
+      recordedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      steps: S.steps
+    }, null, 2);
+  }
+
+  /** 화면에 텍스트박스를 띄워 복사시킨다. 클립보드 API 가 막힌 환경도 있어서 폴백이 필요. */
+  function showExport() {
+    var json = exportJson();
+    try { navigator.clipboard.writeText(json); } catch (e) {}
+    var old = document.getElementById('ke-export');
+    if (old) old.remove();
+    var box = document.createElement('div');
+    box.id = 'ke-export';
+    box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);' +
+                        'display:flex;align-items:center;justify-content:center';
+    box.innerHTML =
+      '<div style="background:#fff;padding:16px;border-radius:8px;width:min(680px,90vw)">' +
+      '<b style="font:13px sans-serif">ke_award/steps.json 에 덮어쓰고 <code>node build.mjs</code></b>' +
+      '<textarea id="ke-export-ta" style="width:100%;height:50vh;margin-top:8px;font:11px Consolas,monospace"></textarea>' +
+      '<button id="ke-export-close" style="margin-top:8px;padding:6px 12px">닫기</button></div>';
+    document.documentElement.appendChild(box);
+    var ta = box.querySelector('#ke-export-ta');
+    ta.value = json;
+    ta.select();
+    box.querySelector('#ke-export-close').onclick = function () { box.remove(); };
+    console.log(json);
+    log('내보내기 - 클립보드에 복사했습니다 (' + S.steps.length + '단계)');
+  }
+
+  // ---- 단계 편집 ----------------------------------------------------------
+  function removeStep(i) {
+    if (i < 0 || i >= S.steps.length) return;
+    var gone = S.steps.splice(i, 1)[0];
+    if (S.idx > i) S.idx--;
+    save(); log('삭제: ' + (gone.text || gone.sel).slice(0, 24));
+  }
+  function moveStep(i, dir) {
+    var j = i + dir;
+    if (i < 0 || i >= S.steps.length || j < 0 || j >= S.steps.length) return;
+    var t = S.steps[i]; S.steps[i] = S.steps[j]; S.steps[j] = t;
+    save(); emit();
+  }
+  function insertAt(i, step) {
+    i = Math.max(0, Math.min(i, S.steps.length));
+    S.steps.splice(i, 0, step);
+    if (S.idx > i) S.idx++;
+    save(); log('추가: ' + (step.text || step.sel).slice(0, 24) + ' (' + (i + 1) + '번째)');
+  }
+  function setStep(i, patch) {
+    if (!S.steps[i]) return;
+    for (var k in patch) S.steps[i][k] = patch[k];
+    save(); emit();
+  }
+  function importJson(text) {
+    var d = JSON.parse(text);
+    var arr = Array.isArray(d) ? d : d.steps;
+    if (!Array.isArray(arr)) throw new Error('steps 배열이 없습니다');
+    for (var i = 0; i < arr.length; i++) {
+      if (!arr[i] || (!arr[i].sel && !arr[i].text)) throw new Error((i + 1) + '번째에 sel/text 가 없습니다');
+    }
+    S.steps = arr; S.idx = 0; save();
+    log('불러오기 ' + arr.length + '단계');
+  }
+
   var API = {
     record: record, stop: stopRec, play: play, pause: pause,
     reset: reset, clear: clear, state: S, save: save,
+    exportJson: exportJson, showExport: showExport, importJson: importJson,
+    removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,
+    loadBaked: function () {
+      S.steps = JSON.parse(JSON.stringify(baked()));
+      S.idx = 0; save();
+      log('내장 단계 ' + S.steps.length + '개를 불러왔습니다');
+    },
     list: function () { console.table(S.steps); return S.steps; },
     onChange: function (fn) { listeners.push(fn); }
   };
@@ -555,6 +654,180 @@ try {
 
 } catch (e) {
   console.error('[KE] recorder 로드 실패:', e);
+}
+
+
+// ---------- editor ----------
+try {
+/* ============================================================
+ * editor.js  --  녹화한 단계 편집 UI
+ *
+ * 녹화는 한 번에 깔끔하게 되지 않는다. 실제로 이런 일이 생긴다:
+ *   - 스크롤을 괜히 두 번 눌러서 불필요한 단계가 끼었다  -> 삭제
+ *   - 마일리지 적용을 안 누르고 넘어갔다               -> 그 자리에 끼워넣기
+ *   - 날짜 버튼은 라벨이 매일 바뀐다                    -> 셀렉터만 쓰도록 전환
+ * 다시 처음부터 녹화하지 않고 고칠 수 있어야 한다.
+ * ============================================================ */
+(function () {
+  'use strict';
+  var W = window;
+  try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
+  if (W.KE_EDIT || window.KE_EDIT) return;
+
+  var U = W.KE_UTIL || window.KE_UTIL;
+
+  function REC() { return W.KE_REC || window.KE_REC; }
+
+  // ---- 엘리먼트 피커 -------------------------------------------------------
+  var picking = null;
+
+  function pick(cb) {
+    stopPick();
+    picking = cb;
+    document.body.style.cursor = 'crosshair';
+  }
+  function stopPick() {
+    picking = null;
+    try { document.body.style.cursor = ''; } catch (e) {}
+  }
+
+  document.addEventListener('click', function (ev) {
+    if (!picking) return;
+    if (ev.target.closest && ev.target.closest('#ke-editor, #ke-hud')) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    var el = ev.target.closest(U.CLICKABLE) || ev.target;
+    var cb = picking;
+    stopPick();
+    cb({
+      sel: U.cssPath(el),
+      text: U.label(el),
+      tag: el.tagName.toLowerCase(),
+      url: location.pathname + location.search,
+      selectorOnly: false
+    });
+  }, true);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && picking) { stopPick(); render(); }
+  }, true);
+
+  // ---- UI ------------------------------------------------------------------
+  var box = null;
+
+  function close() { if (box) { box.remove(); box = null; } stopPick(); }
+
+  function open() {
+    if (box) { render(); return; }
+    box = document.createElement('div');
+    box.id = 'ke-editor';
+    box.innerHTML =
+      '<style>' +
+      '#ke-editor{position:fixed;inset:0;z-index:2147483646;background:rgba(0,0,0,.55);' +
+      'display:flex;align-items:center;justify-content:center;font:12px/1.5 -apple-system,"Malgun Gothic",sans-serif}' +
+      '#ke-editor .w{background:#fff;border-radius:8px;width:min(620px,94vw);max-height:86vh;' +
+      'display:flex;flex-direction:column;padding:14px;color:#222}' +
+      '#ke-editor h4{margin:0 0 8px;font-size:14px;color:#0b4da2}' +
+      '#ke-editor .rows{overflow:auto;flex:1;border:1px solid #eee;border-radius:4px}' +
+      '#ke-editor .r{display:flex;align-items:center;gap:6px;padding:5px 7px;border-bottom:1px solid #f0f0f0}' +
+      '#ke-editor .r:nth-child(odd){background:#fafafa}' +
+      '#ke-editor .n{width:22px;color:#888;text-align:right;flex:none}' +
+      '#ke-editor .t{flex:1;min-width:0}' +
+      '#ke-editor .t b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#ke-editor .t code{font-size:10px;color:#888;display:block;overflow:hidden;' +
+      'text-overflow:ellipsis;white-space:nowrap}' +
+      '#ke-editor button{cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:3px;' +
+      'padding:2px 6px;font:inherit;flex:none}' +
+      '#ke-editor .ins{width:100%;border:1px dashed #bbb;color:#06c;background:#fff;margin:0;' +
+      'border-radius:0;padding:1px;font-size:11px}' +
+      '#ke-editor .foot{display:flex;gap:6px;margin-top:10px}' +
+      '#ke-editor .foot button{padding:6px 10px}' +
+      '#ke-editor .hint{font-size:11px;color:#666;margin-bottom:6px}' +
+      '#ke-editor .so{font-size:10px;padding:1px 4px}' +
+      '#ke-editor .so.on{background:#06c;color:#fff;border-color:#06c}' +
+      '</style>' +
+      '<div class="w"><h4>예매 단계 편집</h4>' +
+      '<div class="hint">✕ 삭제 · ↑↓ 순서 · <b>＋</b> 그 자리에 빠진 단계 끼워넣기 · ' +
+      '<b>고정</b> 은 라벨이 매일 바뀌는 버튼(날짜)에 사용</div>' +
+      '<div class="rows" id="ke-ed-rows"></div>' +
+      '<div class="foot">' +
+      '<button id="ke-ed-add" style="flex:1">맨 끝에 추가</button>' +
+      '<button id="ke-ed-json" style="flex:1">JSON</button>' +
+      '<button id="ke-ed-close" style="flex:1">닫기</button>' +
+      '</div></div>';
+    document.documentElement.appendChild(box);
+    box.querySelector('#ke-ed-close').onclick = close;
+    box.querySelector('#ke-ed-add').onclick = function () { startInsert(REC().state.steps.length); };
+    box.querySelector('#ke-ed-json').onclick = function () { close(); REC().showExport(); };
+    box.addEventListener('click', function (e) { if (e.target === box) close(); });
+    render();
+  }
+
+  function startInsert(at) {
+    var r = REC();
+    close();
+    pick(function (step) {
+      r.insertAt(at, step);
+      open();
+    });
+    // 피커 안내는 HUD 토스트 대신 콘솔+커서로 (패널이 가려질 수 있어서)
+    console.log('%c[KE_EDIT] 추가할 버튼을 클릭하세요 (ESC 취소)', 'color:#06c;font-weight:bold');
+  }
+
+  function render() {
+    if (!box) return;
+    var r = REC();
+    if (!r) return;
+    var steps = r.state.steps;
+    var rows = box.querySelector('#ke-ed-rows');
+    rows.innerHTML = '';
+
+    function insertBar(at) {
+      var b = document.createElement('button');
+      b.className = 'ins';
+      b.textContent = '＋ 여기에 추가';
+      b.onclick = function () { startInsert(at); };
+      rows.appendChild(b);
+    }
+
+    insertBar(0);
+    steps.forEach(function (s, i) {
+      var row = document.createElement('div');
+      row.className = 'r';
+      row.innerHTML =
+        '<span class="n">' + (i + 1) + '</span>' +
+        '<span class="t"><b></b><code></code></span>' +
+        '<button class="so" title="셀렉터만 사용 (라벨 무시)">고정</button>' +
+        '<button title="위로">↑</button><button title="아래로">↓</button>' +
+        '<button title="삭제">✕</button>';
+      row.querySelector('b').textContent = s.text || '(라벨 없음)';
+      row.querySelector('code').textContent = s.sel || '';
+      var so = row.querySelector('.so');
+      if (s.selectorOnly) so.classList.add('on');
+      so.onclick = function () { r.setStep(i, { selectorOnly: !s.selectorOnly }); render(); };
+      var btns = row.querySelectorAll('button');
+      btns[1].onclick = function () { r.moveStep(i, -1); render(); };
+      btns[2].onclick = function () { r.moveStep(i, 1); render(); };
+      btns[3].onclick = function () { r.removeStep(i); render(); };
+      rows.appendChild(row);
+      insertBar(i + 1);
+    });
+
+    if (!steps.length) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'padding:14px;color:#888;text-align:center';
+      empty.textContent = '단계가 없습니다. 패널에서 ● 녹화 를 먼저 하세요.';
+      rows.appendChild(empty);
+    }
+  }
+
+  var API = { open: open, close: close, render: render, pick: pick };
+  try { W.KE_EDIT = API; } catch (e) {}
+  if (W !== window) { try { window.KE_EDIT = API; } catch (e) {} }
+})();
+
+} catch (e) {
+  console.error('[KE] editor 로드 실패:', e);
 }
 
 
@@ -988,6 +1261,8 @@ try {
       '<button id="ke-rec" style="background:#a0f">● 녹화</button>' +
       '<button id="ke-play" style="background:#06c">▶ 재생</button>' +
       '<button id="ke-clear" style="background:#888">삭제</button></div>' +
+      '<button id="ke-edit" style="background:#06c;width:100%">단계 편집</button>' +
+      '<button id="ke-export" style="background:#555;width:100%">내보내기 (steps.json 용)</button>' +
       '<div id="ke-rec-msg" style="font-size:11px;color:#606"></div>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
       '<label>정시 동작: <b id="ke-mode-label"></b></label>' +
@@ -1037,6 +1312,11 @@ try {
         }
         renderRec();
       };
+      root.querySelector('#ke-edit').onclick = function () {
+        var E = W.KE_EDIT || window.KE_EDIT;
+        if (E) E.open(); else toast('편집기를 불러오지 못했습니다', true);
+      };
+      root.querySelector('#ke-export').onclick = function () { REC.showExport(); };
       root.querySelector('#ke-clear').onclick = function () {
         if (confirm('녹화된 단계를 모두 지울까요?')) { REC.clear(); renderRec(); }
       };

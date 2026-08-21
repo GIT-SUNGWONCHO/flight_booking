@@ -72,12 +72,38 @@
 | **● 녹화** | 이후의 모든 클릭을 순서대로 기록 (패널 자체 클릭은 제외) |
 | **▶ 재생** | 기록한 순서대로 재생. 각 단계는 요소가 나타날 때까지 최대 20초 대기 |
 | **삭제** | 기록 초기화 |
+| **단계 편집** | 삭제 / 순서 이동 / 빠뜨린 단계 끼워넣기 |
+| **내보내기** | `ke_award/steps.json` 에 붙여넣을 JSON 을 뽑음 |
 
 - **페이지가 바뀌어도 이어서 재생합니다.** 진행 위치를 localStorage에 두기 때문에
   조회 → 결과 → 정보입력 → 결제처럼 이동이 끼어도 끊기지 않습니다
 - **`결제하기` 앞에서 반드시 멈춥니다.** 마일리지와 현금이 실제로 빠지는 지점이라
   자동으로 넘기지 않습니다 (`KE_REC.state.allowPay = true` 로 풀 수는 있음)
 - 요소를 20초 안에 못 찾으면 멈추고 몇 번째 단계에서 막혔는지 표시합니다
+
+#### 녹화를 고치기
+
+한 번에 깔끔하게 녹화되지 않습니다. **단계 편집**에서:
+
+- **✕** 괜히 눌린 단계 삭제 (스크롤 중복 등)
+- **↑↓** 순서 바로잡기
+- **＋ 여기에 추가** 빠뜨린 단계 끼워넣기 → 누르면 커서가 십자로 바뀌고,
+  화면에서 그 버튼을 클릭하면 그 자리에 삽입됩니다 (실제로 눌리지는 않음)
+- **고정** 라벨이 매일 바뀌는 버튼(날짜)에 켜면 셀렉터만 쓰고 텍스트는 무시합니다
+
+#### PC 를 옮길 때
+
+녹화는 브라우저 localStorage 에 있어서 그대로는 안 따라갑니다. **내보내기** 로 뽑아
+[ke_award/steps.json](ke_award/steps.json) 에 덮어쓰고 커밋하면, 빌드할 때 스크립트
+안으로 들어가서 어느 PC 에서든 같은 단계를 들고 갑니다.
+
+```powershell
+# steps.json 갱신 후
+node build.mjs      # "내장 단계 N개" 가 찍히면 성공
+```
+
+브라우저에 직접 녹화한 게 있으면 그쪽이 우선합니다. 내장본을 강제로 쓰려면
+콘솔에서 `KE_REC.loadBaked()`.
 
 녹화 순서 예시 (님 플로우 그대로):
 
@@ -192,7 +218,9 @@ copy config.example.yaml config.yaml
   모달 체인 통과 13건. 셀렉터 경로 / 텍스트 경로 / 매진 분기
 - [test/test_hud.py](test/test_hud.py) — 유저스크립트 경로 17건. 연습 발사로
   카운트다운 → 조회 → 좌석 → 모달 → 자동 정지 전 구간
-- [test/test_recorder.py](test/test_recorder.py) — 녹화/재생 13건.
+- [test/test_editor.py](test/test_editor.py) — 단계 편집 13건. 실수가 섞인 녹화를
+  (중복 클릭 삭제 + 빠뜨린 좌석 삽입 + 날짜 셀렉터 고정) 고쳐서 재생까지 되는지
+- [test/test_recorder.py](test/test_recorder.py) — 녹화/재생 19건.
   [test/fixture/booking.html](test/fixture/booking.html) 이 실제 흐름(페이지 이동,
   위험품 팝업, 이미 켜진 동의, 결제 버튼)을 흉내내고, 재생이 순서를 그대로
   재현하는지 / 동의를 풀지 않는지 / 결제 앞에서 멈추는지 검증
@@ -218,6 +246,8 @@ copy config.example.yaml config.yaml
 ke_award/autoconfirm.js   모달 자동 통과 엔진 (유저스크립트·Playwright 공용)
 ke_award/util.js          공용 유틸 (CSS 경로, 요소 탐색)
 ke_award/recorder.js      예매 단계 녹화/재생 (페이지 이동 넘어 이어짐)
+ke_award/editor.js        단계 편집 UI (삭제/순서/삽입)
+ke_award/steps.json       녹화 단계 (빌드 시 스크립트에 내장)
 ke_award/hud.js           유저스크립트 전용 컨트롤 패널
 ke_award/clock.py         NTP 시각 동기화 (외부 의존성 없음)
 ke_award/runner.py        Playwright 러너

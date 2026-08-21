@@ -17,27 +17,32 @@ function Invoke-Stage([string]$Title, [scriptblock]$Body, [string]$OnFail) {
   if ($LASTEXITCODE -ne 0) { throw $OnFail }
 }
 
-Invoke-Stage "[1/5] 라벨 판정 유닛테스트" { node test/test_autoconfirm.js } "유닛테스트 실패"
+Invoke-Stage "[1/6] 라벨 판정 유닛테스트" { node test/test_autoconfirm.js } "유닛테스트 실패"
 
-Invoke-Stage "[2/5] 유저스크립트 빌드" {
+Invoke-Stage "[2/6] 유저스크립트 빌드" {
   node build.mjs
   node --check userscript/ke-award-macro.user.js
 } "빌드 실패"
 
 Reset-Browsers
-Invoke-Stage "[3/5] 브라우저 통합테스트" {
+Invoke-Stage "[3/6] 브라우저 통합테스트" {
   & ./.venv/Scripts/python.exe test/test_integration.py
 } "통합테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[4/5] 유저스크립트(HUD) 테스트" {
+Invoke-Stage "[4/6] 유저스크립트(HUD) 테스트" {
   & ./.venv/Scripts/python.exe test/test_hud.py
 } "HUD 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[5/5] 녹화/재생 테스트" {
+Invoke-Stage "[5/6] 녹화/재생 테스트" {
   & ./.venv/Scripts/python.exe test/test_recorder.py
 } "녹화/재생 테스트 실패"
+
+Reset-Browsers
+Invoke-Stage "[6/6] 단계 편집 테스트" {
+  & ./.venv/Scripts/python.exe test/test_editor.py
+} "편집 테스트 실패"
 
 Reset-Browsers
 Write-Host "`n전체 통과" -ForegroundColor Green

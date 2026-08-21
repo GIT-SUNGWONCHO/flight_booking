@@ -1,7 +1,7 @@
 /* autoconfirm.js + hud.js  ->  userscript/ke-award-macro.user.js
  * 엔진을 한 곳에서만 관리하기 위한 스티처.  실행:  node build.mjs
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 
 /* @grant 를 none 으로 두면 Tampermonkey 가 페이지 컨텍스트에 <script> 로 밀어넣는데,
  * CSP 가 강한 사이트(항공사 등)에서는 그게 차단되어 스크립트가 조용히 죽는다.
@@ -36,11 +36,39 @@ ${src}
 `;
 }
 
-// util 이 가장 먼저 로드되어야 recorder/hud 가 KE_UTIL 을 쓸 수 있다
-const MODULES = ['util', 'autoconfirm', 'recorder', 'hud'];
-const out = [HEADER]
-  .concat(MODULES.map((m) => isolate(m, readFileSync(`ke_award/${m}.js`, 'utf8'))))
-  .join('\n');
+/* 녹화 단계를 스크립트 안에 굽는다.
+ * localStorage 에만 두면 PC 를 옮길 때 사라지고 git 으로 관리도 안 된다.
+ * steps.json 을 커밋해두면 어느 PC 에서 빌드해도 같은 단계를 들고 간다. */
+function bakedSteps() {
+  const path = 'ke_award/steps.json';
+  let steps = [];
+  let at = '';
+  if (existsSync(path)) {
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    steps = Array.isArray(raw) ? raw : raw.steps || [];
+    at = (raw && raw.recordedAt) || '';
+  }
+  const body = `  var S = ${JSON.stringify(steps)};
+  var W = window;
+  try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
+  try { W.KE_STEPS_BAKED = S; } catch (e) {}
+  if (W !== window) { try { window.KE_STEPS_BAKED = S; } catch (e) {} }
+  if (S.length) console.log('[KE] 내장 단계 ' + S.length + '개${at ? ' (' + at + ')' : ''}');`;
+  return { js: `(function () {\n${body}\n})();`, count: steps.length };
+}
+
+// util 이 가장 먼저 로드되어야 recorder/hud 가 KE_UTIL 을 쓸 수 있고,
+// steps 는 recorder 보다 먼저 있어야 기본값으로 집어갈 수 있다
+const baked = bakedSteps();
+const out = [
+  HEADER,
+  isolate('util', readFileSync('ke_award/util.js', 'utf8')),
+  isolate('autoconfirm', readFileSync('ke_award/autoconfirm.js', 'utf8')),
+  isolate('steps', baked.js),
+  isolate('recorder', readFileSync('ke_award/recorder.js', 'utf8')),
+  isolate('editor', readFileSync('ke_award/editor.js', 'utf8')),
+  isolate('hud', readFileSync('ke_award/hud.js', 'utf8')),
+].join('\n');
 
 mkdirSync('userscript', { recursive: true });
 writeFileSync('userscript/ke-award-macro.user.js', out, 'utf8');

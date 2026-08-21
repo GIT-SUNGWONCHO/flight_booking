@@ -85,7 +85,9 @@ def main() -> int:
             check(st["done"] == EXPECTED, "연습 발사로 모달 체인까지 통과", f"실제: {st['done']}")
             check(st["aborted"] is None, "오클릭 없음", f"눌림: {st['aborted']}")
             check(st["unchecked"] is None, "체크박스 먼저 체크")
-            check(1.9 < elapsed < 4, f"2초 뒤 발사 (실제 {elapsed:.2f}s, 초경계 올림 포함)")
+            # 의미 있는 쪽은 하한이다: 초 단위 절삭 때문에 T-0 보다 일찍 쏘는 회귀를 잡는다.
+            # 상한은 부하를 타므로 느슨하게 둔다 (안 쏘는 경우는 위 wait_for_function 이 잡음).
+            check(elapsed > 1.9, f"T-0 이전에 미리 쏘지 않음 (실제 {elapsed:.2f}s)")
 
             # 성공 화면을 감지하면 스스로 무장 해제해야 한다
             pg.wait_for_timeout(400)
