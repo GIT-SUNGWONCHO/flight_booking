@@ -133,13 +133,41 @@ KE_AUTO.autoFinal = true   // 최종 발권 버튼까지 자동 (기본 false)
 
 ---
 
+### 다른 PC / 맥북에서
+
+유저스크립트만 쓸 거면 **Node 도 파이썬도 필요 없습니다.** clone 해서
+[userscript/ke-award-macro.user.js](userscript/ke-award-macro.user.js) 를 열고
+Tampermonkey 에 붙여넣으면 끝입니다 (빌드 결과물이 커밋되어 있음).
+녹화 단계도 [ke_award/steps.json](ke_award/steps.json) 에서 스크립트로 구워져
+같이 따라갑니다.
+
+맥/윈도우 어느 쪽이든 Chrome + Tampermonkey 면 동작은 같습니다.
+소스를 고쳐서 다시 빌드할 때만 Node 가 필요합니다.
+
+```bash
+git clone https://github.com/GIT-SUNGWONCHO/flight_booking.git
+cd flight_booking
+node build.mjs            # 소스를 고쳤을 때만
+```
+
+---
+
 ## B. Playwright 풀오토
 
 ```powershell
+# Windows
 python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r requirements.txt
-./.venv/Scripts/python.exe -m playwright install chromium   # 번들 브라우저 (폴백용)
+./.venv/Scripts/python.exe -m playwright install chromium
 copy config.example.yaml config.yaml
+```
+
+```bash
+# macOS / Linux
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m playwright install chromium
+cp config.example.yaml config.yaml
 ```
 
 ```powershell
@@ -209,7 +237,8 @@ copy config.example.yaml config.yaml
 ## 테스트
 
 ```powershell
-./run-tests.ps1
+./run-tests.ps1     # Windows
+./run-tests.sh      # macOS / Linux / Git Bash
 ```
 
 - [test/test_autoconfirm.js](test/test_autoconfirm.js) — 라벨 판정 29건.

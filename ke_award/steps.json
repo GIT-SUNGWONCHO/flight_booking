@@ -1,5 +1,136 @@
 {
-  "note": "녹화한 예매 단계. 패널의 [내보내기] 로 뽑아 steps 배열에 붙여넣고 커밋하면, 빌드 시점에 유저스크립트 안으로 들어가 PC 를 옮겨도 따라간다. 브라우저에 녹화본이 이미 있으면 그쪽이 우선한다.",
-  "recordedAt": "",
-  "steps": []
+  "note": "koreanair.com 실측 녹화(일반석 KE901, 2027-08-16). 원본 22단계에서 아래를 정리함. 패널 [내보내기] 로 갱신 후 node build.mjs.",
+  "recordedAt": "2026-08-21 06:03:01",
+  "cleanup": [
+    "제거: #flight-bonus00 / #rad-naverpay - label 클릭이 연결된 input 을 자동으로 누르므로 중복 기록된 것",
+    "제거: #submit-passenger-ADT-0 중복 1회 - 같은 버튼 연속 2회는 더블클릭 흔적",
+    "제거: 마일리지 적용 전에 눌린 #btn-payment 와 그때 뜬 경고팝업 확인 - 순서 오류의 산물",
+    "변경: 날짜 셀(#dep-fare-5-1) selectorOnly=true - 라벨에 '선택됨' 이 들어가 클릭 전에는 절대 매칭되지 않음"
+  ],
+  "verify": [
+    "1번 #panel-0 (div) 은 스치듯 눌린 것으로 보임. 재생이 멀쩡하면 지워도 됨",
+    "13번 #btn-resv-agree-1 은 10번에서 이미 눌렸음. 토글이면 여기서 동의가 풀릴 수 있으니 재생 때 눈으로 확인",
+    "4번 항공편 라벨 텍스트가 '일반석 52,500 마일' 이라 프레스티지로 갈 때는 다시 지정해야 함"
+  ],
+  "steps": [
+    {
+      "sel": "#panel-0",
+      "text": "2027년 7월 - 부터 2027년 8월 성수기 일반석 프리미엄석 프레스",
+      "tag": "div",
+      "url": "/booking/calendar-fare-bonus",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#dep-fare-5-1",
+      "text": "16 08월 16일 (월) , 성수기 일반석 , 선택됨",
+      "tag": "td",
+      "url": "/booking/calendar-fare-bonus",
+      "selectorOnly": true
+    },
+    {
+      "sel": "ke-calendar-fare-bonus-main-cont.ng-star-inserted > ke-calendar-fare-bonus-main-pres.ng-star-inserted > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host",
+      "text": "검색",
+      "tag": "kds-button_1",
+      "url": "/booking/calendar-fare-bonus",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#classEconomyList0 > div.flight-n__cabin-group.-bonus > div.flight-n__cabin-wrap.ng-star-inserted:nth-of-type(1) > label.flight-n__cabin-info.-bonus",
+      "text": "항공편명 KE901 일반석 52,500 마일",
+      "tag": "label",
+      "url": "/booking/select-award-flight/departure",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#payment-widget > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button > kds-button_1.--wds-ui.ui-button__host",
+      "text": "다음",
+      "tag": "kds-button_1",
+      "url": "/booking/select-award-flight/departure",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#submit-passenger-ADT-0",
+      "text": "확인",
+      "tag": "button",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#submit-contact",
+      "text": "확인",
+      "tag": "button",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btn-resv-agree-1",
+      "text": "동의",
+      "tag": "button",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btn-resv-agree-3",
+      "text": "동의",
+      "tag": "button",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btnScrollDown > kds-button_1.--wds-ui.ui-button__host",
+      "text": "아래로 스크롤",
+      "tag": "kds-button_1",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btnScrollDown > kds-button_1.--wds-ui.ui-button__host",
+      "text": "아래로 스크롤",
+      "tag": "kds-button_1",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btnConfirm > kds-button_1.--wds-ui.ui-button__host",
+      "text": "확인",
+      "tag": "kds-button_1",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btn-resv-agree-1",
+      "text": "동의",
+      "tag": "button",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btnConfirm",
+      "text": "확인",
+      "tag": "button",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted",
+      "text": "Npay",
+      "tag": "label",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btnAwardUseMileageApply",
+      "text": "적용",
+      "tag": "button",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btn-payment",
+      "text": "결제하기 새 창 열림",
+      "tag": "button",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    }
+  ]
 }

@@ -70,8 +70,11 @@ def main() -> int:
             check(pg.evaluate("window.__seatClicked") == 0, "미리보기는 실제로 누르지 않음")
 
             # 연습 발사: 2초 뒤 조회 -> 좌석 -> 모달 체인
+            # steps.json 에 녹화가 내장되어 있으면 정시 동작이 replay 로 잡힌다.
+            # 이 테스트는 조회버튼 경로를 보는 것이므로 명시적으로 search 로 둔다.
             pg.evaluate("""() => {
               const S = window.KE_HUD.state;
+              S.onOpen = 'search';
               S.fireSel = '#seat'; S.seatSel = '#seat';
               window.KE_HUD.rehearse(2);
             }""")
