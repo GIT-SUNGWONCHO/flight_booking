@@ -1,6 +1,8 @@
 config.yaml
 profile/
 .test-profile*/
+.debug-profile/
+.dev-shots/
 .venv/
 shots/
 probe_result.txt

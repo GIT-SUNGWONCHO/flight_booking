@@ -1,9 +1,13 @@
 /* ============================================================
  * hud.js  --  화면 우상단 컨트롤 패널
  *   - KST 서버시각 동기화 (Date 헤더 edge detection)
- *   - 오픈시각 카운트다운 + 자동 발사
- *   - 조회 버튼 지정(엘리먼트 피커) / 매진 감지 후 재조회
- *   - 성공 감지 시 소리 알림
+ *   - 오픈시각 카운트다운 -> 정시에 "새로고침 + 녹화 재생" 발사
+ *   - 녹화/재생/편집 컨트롤
+ *   - 재생이 멈추는 순간(결제 직전 / 전체 완료) 소리 알림
+ *
+ * 실제 발사 동작은 recorder.js 의 녹화 재생 하나뿐이다.
+ * (예전엔 "조회 버튼 지정 + 좌석 헌팅" 경로도 있었지만, 녹화 재생이 그 일을
+ *  전부 대신하므로 걷어냈다. 관련 컨트롤/상태도 같이 제거됨)
  * autoconfirm.js 가 먼저 로드되어 window.KE_AUTO 가 있어야 한다.
  * ============================================================ */
 (function () {
@@ -22,12 +26,6 @@
   var S = {
     targetKst: '',        // "2026-08-22 10:00:00"
     leadMs: 150,          // 네트워크 지연 보정: 이만큼 먼저 발사
-    retryMs: 1200,        // 재조회 간격 하한 (서버 부담/봇탐지 방지)
-    fireSel: '',          // 조회 버튼 CSS 경로
-    fireText: '',         // 조회 버튼 라벨 (셀렉터 실패 시 폴백)
-    onOpen: 'replay',     // 정시 동작: 'replay'(새로고침+녹화재생) | 'search'(조회버튼 클릭)
-    seatSel: '',          // 좌석 버튼 CSS 경로 (선택)
-    seatText: '',         // 좌석 버튼 라벨 (선택)
     armed: false
   };
   try { Object.assign(S, JSON.parse(localStorage.getItem(LS) || '{}')); } catch (e) {}
@@ -36,7 +34,8 @@
   var offsetMs = 0;        // 서버시각 - 로컬시각
   var syncQuality = '미동기화';
   var timer = null;
-  var retryTimer = null;
+
+  function REC() { return W.KE_REC || window.KE_REC; }
 
   // ---- 시각 --------------------------------------------------------------
   function nowSrv() { return Date.now() + offsetMs; }
@@ -97,162 +96,58 @@
   }
 
   // ---- 발사 --------------------------------------------------------------
-  function cssPath(el) {
-    if (el.id) return '#' + CSS.escape(el.id);
-    var parts = [];
-    while (el && el.nodeType === 1 && parts.length < 6) {
-      if (el.id) { parts.unshift('#' + CSS.escape(el.id)); break; }
-      var s = el.tagName.toLowerCase();
-      var cls = Array.prototype.filter.call(el.classList, function (c) {
-        return !/^(ng-|is-|active|selected|hover|focus)/.test(c);
-      }).slice(0, 2);
-      if (cls.length) s += '.' + cls.map(function (c) { return CSS.escape(c); }).join('.');
-      var p = el.parentElement;
-      if (p) {
-        var same = Array.prototype.filter.call(p.children, function (n) { return n.tagName === el.tagName; });
-        if (same.length > 1) s += ':nth-of-type(' + (same.indexOf(el) + 1) + ')';
-      }
-      parts.unshift(s);
-      el = p;
-    }
-    return parts.join(' > ');
-  }
-
-  function visible(el) {
-    if (!el || !el.isConnected || el.disabled) return false;
-    var r = el.getBoundingClientRect();
-    return r.width > 2 && r.height > 2;
-  }
-
-  /** 셀렉터 우선, 실패하면 라벨 텍스트로 폴백. 화면이 리렌더돼도 다시 찾을 수 있게. */
-  function findEl(sel, text) {
-    if (sel) {
-      try {
-        var e = document.querySelector(sel);
-        if (visible(e)) return e;
-      } catch (err) {}
-    }
-    if (text) {
-      var all = document.querySelectorAll('button, a, input[type="submit"], [role="button"]');
-      for (var i = 0; i < all.length; i++) {
-        var t = (all[i].innerText || all[i].value || '').replace(/\s+/g, '').trim();
-        if (t === text && visible(all[i])) return all[i];
-      }
-    }
-    return null;
-  }
-
+  /* 정시 동작: "새로고침이 끝난 뒤에 처음부터 재생" 을 예약하고 새로고침한다.
+   * 여기서 바로 play() 를 부르면 안 된다 - recorder 의 tick 이 낡은 화면에서 1단계
+   * (그날 새로 열린 날짜)를 눌러버리고, 이어지는 새로고침이 그 선택을 통째로 날린다.
+   * 예약은 localStorage 에 남아 새 문서가 뜰 때 recorder 가 스스로 집어간다. */
   function fire(reason) {
-    var REC = W.KE_REC || window.KE_REC;
-
-    /* 녹화된 단계가 있으면 정시 동작은 "새로고침 -> 재생" 이다.
-     * playing=true 가 localStorage 에 저장되므로, 새로고침 뒤 recorder 가 이어받아
-     * 1단계(새로 열린 날짜)부터 밟는다. */
-    if (S.onOpen === 'replay' && REC && REC.state.steps.length) {
-      REC.reset();
-      REC.play();
-      // 재생은 recorder 가 몰기 때문에 HUD 의 매진 재조회 루프와 겹치면 안 된다
-      S.armed = false;
-      save();
-      toast('발사 (' + reason + ') - 새로고침 후 재생 @ ' + fmtKst(nowSrv()));
-      setTimeout(function () { location.reload(); }, 0);
-      return true;
+    var R = REC();
+    if (!R || !R.state.steps.length) {
+      toast('녹화된 단계가 없습니다 - 먼저 ● 녹화 하세요', true);
+      return false;
     }
-
-    var el = findEl(S.fireSel, S.fireText);
-    if (!el) { toast('조회 버튼을 못 찾음 - [조회 지정] 다시 하세요', true); return false; }
-    el.scrollIntoView({ block: 'center' });
-    el.click();
-    hunting = !!(S.seatSel || S.seatText);   // 조회했으니 이제 좌석 등장을 노린다
-    toast('발사 (' + reason + ') @ ' + fmtKst(nowSrv()));
+    if (!R.armForReload()) return false;
+    // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
+    S.armed = false;
+    save();
+    toast('발사 (' + reason + ') - 새로고침 후 재생 @ ' + fmtKst(nowSrv()));
+    setTimeout(function () { location.reload(); }, 0);
     return true;
   }
 
-  /* 좌석은 조회 결과가 그려진 뒤에야 나타난다. armed 상태에서 tick 마다 훑어
-   * 등장 즉시 클릭한다. 이후 안내사항 모달은 autoconfirm.js 가 이어받는다. */
-  var hunting = false;
-  function huntSeat() {
-    if (!hunting || !S.armed) return;
-    var el = findEl(S.seatSel, S.seatText);
-    if (!el) return;
-    hunting = false;
-    el.scrollIntoView({ block: 'center' });
-    el.click();
-    toast('좌석 클릭 @ ' + fmtKst(nowSrv()));
-  }
-
-  var picking = null;      // null | 'fire' | 'seat'
-  function startPick(kind) {
-    picking = kind;
-    toast((kind === 'fire' ? '조회' : '좌석') + ' 버튼을 클릭하세요 (ESC 취소)');
-    document.body.style.cursor = 'crosshair';
-  }
-  function stopPick() { picking = null; document.body.style.cursor = ''; }
-
-  document.addEventListener('click', function (ev) {
-    if (!picking) return;
-    ev.preventDefault(); ev.stopPropagation();
-    var el = ev.target.closest('button, a, input, [role="button"]') || ev.target;
-    var sel = cssPath(el);
-    var text = (el.innerText || el.value || '').replace(/\s+/g, '').trim().slice(0, 30);
-    if (picking === 'fire') { S.fireSel = sel; S.fireText = text; }
-    else { S.seatSel = sel; S.seatText = text; }
-    save(); stopPick(); render();
-    toast('지정됨: ' + (text || sel));
-  }, true);
-
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && picking) { stopPick(); toast('지정 취소'); }
-  }, true);
-
-  // ---- 매진 감지 / 재조회 -------------------------------------------------
-  var SOLDOUT = /매진|좌석이\s*없|잔여\s*좌석\s*없|조회된\s*(여정|항공편)이\s*없|해당\s*조건.*없|不可|no\s+(seats|availability)/i;
-  var SUCCESS = /예약(번호|이\s*완료)|발권\s*완료|여정\s*확인|예약이\s*정상|booking\s+reference|reservation\s+complete/i;
-  var SESSION = /세션.*(종료|만료)|시간이\s*초과|다시\s*시도|처음부터/i;
-
-  function pageText() { return (document.body.innerText || '').slice(0, 20000); }
-
-  function watch() {
-    if (!S.armed) return;
-    var t = pageText();
-    if (SUCCESS.test(t)) { succeed(); return; }
-    if (SOLDOUT.test(t) || SESSION.test(t)) {
-      if (!retryTimer) {
-        retryTimer = setTimeout(function () {
-          retryTimer = null;
-          if (S.armed) fire('재조회');
-        }, S.retryMs);
-        setStatus('매진/세션끊김 감지 - ' + S.retryMs + 'ms 후 재조회');
-      }
-    }
-  }
-
-  var beeped = false;
-  function succeed() {
-    if (beeped) return;
-    beeped = true;
-    S.armed = false; save(); render();
-    setStatus('예약 성공 화면 감지! 자동화 정지됨');
+  // ---- 알림 --------------------------------------------------------------
+  /* 재생이 멈추는 순간 = 사람이 개입해야 하는 순간.
+   * 끝까지 간 것과 중간에 막힌 것은 대응이 전혀 다르므로 소리와 제목을 다르게 낸다.
+   * (같은 소리를 내면 막혀서 멈춘 걸 "완료" 로 오해하게 된다) */
+  function beep(freqs, dur) {
     try {
       var ac = new (window.AudioContext || window.webkitAudioContext)();
-      [0, 0.25, 0.5].forEach(function (d) {
+      freqs.forEach(function (f, i) {
         var o = ac.createOscillator(), g = ac.createGain();
         o.connect(g); g.connect(ac.destination);
-        o.frequency.value = 880; g.gain.value = 0.2;
-        o.start(ac.currentTime + d); o.stop(ac.currentTime + d + 0.18);
+        o.frequency.value = f; g.gain.value = 0.2;
+        o.start(ac.currentTime + i * dur); o.stop(ac.currentTime + i * dur + dur * 0.8);
       });
     } catch (e) {}
-    document.title = '★예약성공★ ' + document.title;
+  }
+
+  function notify(msg, ok) {
+    setStatus(msg || '재생이 멈췄습니다');
+    if (ok) beep([880, 1175, 1568], 0.16);        // 올라가는 3음 = 끝까지 갔음
+    else    beep([440, 330, 247, 196], 0.22);     // 내려가는 4음 = 막혔으니 봐야 함
+    var tag = ok ? '★완료★ ' : '⚠멈춤⚠ ';
+    document.title = tag + document.title.replace(/^(★완료★|⚠멈춤⚠)\s*/, '');
   }
 
   // ---- UI ----------------------------------------------------------------
   var root, statusEl, clockEl, cdEl, toastEl;
 
+  // 패널에는 항상 표시. 콘솔은 경고/오류만 (평상시 로그로 콘솔을 채우지 않는다)
   function toast(msg, warn) {
     if (!toastEl) return;
     toastEl.textContent = msg;
     toastEl.style.color = warn ? '#c00' : '#060';
-    console.log('[KE_HUD] ' + msg);
+    if (warn) console.warn('[KE_HUD] ' + msg);
   }
   function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
 
@@ -276,8 +171,6 @@
     } else {
       cdEl.textContent = '오픈시각 미설정';
     }
-    huntSeat();
-    watch();
   }
 
   function schedule() {
@@ -306,49 +199,37 @@
   }
 
   /* 연습: 오픈시각을 몇 초 뒤로 잡고 그대로 무장한다.
-   * 카운트다운 -> 정시 발사 -> 좌석 탐색까지 실제와 같은 경로를 탄다. */
+   * 카운트다운 -> 정시 발사 -> 새로고침 -> 재생까지 실전과 같은 경로를 탄다. */
   function rehearse(sec) {
-    // 재생 모드에서는 조회 버튼 지정이 필요 없다 (녹화 1단계가 그 역할을 한다)
-    var REC = W.KE_REC || window.KE_REC;
-    var canReplay = S.onOpen === 'replay' && REC && REC.state.steps.length;
-    if (!canReplay && !S.fireSel && !S.fireText) {
-      toast('먼저 [조회 지정] 을 하거나 단계를 녹화하세요', true);
+    var R = REC();
+    if (!R || !R.state.steps.length) {
+      toast('녹화된 단계가 없습니다 - 먼저 ● 녹화 하세요', true);
       return;
     }
     // 입력칸은 초 단위라 그냥 넣으면 밀리초가 잘려 최대 1초 일찍 발사된다. 초 경계로 올림.
     S.targetKst = kstInput(Math.ceil((nowSrv() + sec * 1000) / 1000) * 1000);
     S.armed = true;
-    beeped = false;
     save(); render(); schedule();
     toast('연습: ' + sec + '초 뒤 발사합니다');
   }
 
-  /** 지금 화면에서 자동클릭이 누를 후보를 미리 본다 (실제로 누르지는 않음) */
-  function preview() {
-    var A = W.KE_AUTO || window.KE_AUTO;
-    if (!A) { toast('자동클릭 엔진이 없습니다', true); return; }
-    var rows = A.scan();
-    var hit = rows.filter(function (r) { return r.wouldClick; }).map(function (r) { return r.text; });
-    setStatus(hit.length
-      ? '누를 후보 ' + hit.length + '개: ' + hit.join(', ')
-      : '누를 후보 없음 (버튼 ' + rows.length + '개 검사)');
-    toast('전체 목록은 F12 콘솔의 표를 보세요');
-  }
-
-  /** 녹화/재생 상태를 패널에 반영 */
+  /** 녹화/재생 상태를 패널에 반영 + 재생이 멈추는 순간 알림 */
+  var wasPlaying = false;
   function renderRec() {
     if (!root) return;
-    var REC = W.KE_REC || window.KE_REC;
-    if (!REC) return;
-    var st = REC.state;
+    var R = REC();
+    if (!R) return;
+    var st = R.state;
     var lab = root.querySelector('#ke-step-label');
     var rec = root.querySelector('#ke-rec');
     var play = root.querySelector('#ke-play');
     var msg = root.querySelector('#ke-rec-msg');
     if (lab) {
+      var el = R.elapsed ? R.elapsed() : 0;
       lab.textContent = st.steps.length + '단계'
         + (st.playing ? ' - 재생 중 ' + (st.idx + 1) + '/' + st.steps.length
-                      : (st.idx ? ' (' + st.idx + '까지 진행됨)' : ''));
+                      : (st.idx ? ' (' + st.idx + '까지 진행됨)' : ''))
+        + (el ? '  ' + el.toFixed(1) + 's' : '');
     }
     if (rec) {
       rec.textContent = st.recording ? '■ 녹화중지' : '● 녹화';
@@ -359,6 +240,20 @@
       play.style.background = st.playing ? '#c33' : '#06c';
     }
     if (msg) msg.textContent = st.message || '';
+
+    /* 재생 중이다가 멈췄으면 사람을 부른다.
+     * "끝까지 감"(결제 단계 도달 / 전 단계 완료) 과 "중간에 막힘"(요소 못 찾음 /
+     * 건너뜀 / 목표 날짜 불일치) 을 구분해서 알린다. */
+    if (wasPlaying && !st.playing) {
+      var m = st.message || '';
+      // 사용자가 직접 정지한 건 알릴 필요 없다
+      if (!/사용자 중지/.test(m)) {
+        var ok = st.steps.length > 0 && st.idx >= st.steps.length
+                 && !/건너뛰|못 찾|다릅니다/.test(m);
+        notify(m, ok);
+      }
+    }
+    wasPlaying = st.playing;
   }
 
   function render() {
@@ -372,14 +267,12 @@
     }
     root.querySelector('#ke-target').value = S.targetKst;
     root.querySelector('#ke-lead').value = S.leadMs;
-    root.querySelector('#ke-retry').value = S.retryMs;
-    var ml = root.querySelector('#ke-mode-label');
-    if (ml) {
-      ml.textContent = S.onOpen === 'replay' ? '새로고침 + 녹화 재생' : '조회 버튼 클릭';
-      ml.style.color = S.onOpen === 'replay' ? '#06c' : '#444';
+    var R2 = REC();
+    if (R2) {
+      root.querySelector('#ke-cabin').value = R2.state.cabin || '일반석';
+      root.querySelector('#ke-expect').value = R2.state.expectDate || '';
+      root.querySelector('#ke-allowpay').checked = !!R2.state.allowPay;
     }
-    root.querySelector('#ke-btn-label').textContent = S.fireText || S.fireSel || '(미지정)';
-    root.querySelector('#ke-seat-label').textContent = S.seatText || S.seatSel || '(미지정 - 직접 클릭)';
     var arm = root.querySelector('#ke-arm');
     arm.textContent = S.armed ? '■ 정지' : '▶ 대기 시작';
     arm.style.background = S.armed ? '#c33' : '#2a7';
@@ -390,7 +283,7 @@
     root.id = 'ke-hud';
     root.innerHTML =
       '<style>' +
-      '#ke-hud{position:fixed;top:10px;right:10px;z-index:2147483647;width:290px;' +
+      '#ke-hud{position:fixed;top:10px;right:10px;z-index:2147483647;width:270px;' +
       'font:12px/1.5 -apple-system,"Malgun Gothic",sans-serif;background:#fff;color:#222;' +
       'border:2px solid #0b4da2;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.25);padding:10px}' +
       '#ke-hud h4{margin:0 0 6px;font-size:13px;color:#0b4da2}' +
@@ -407,19 +300,24 @@
       '<div id="ke-body">' +
       '<div id="ke-clock">--</div><div id="ke-cd">--</div>' +
       '<label>오픈시각 (KST)</label><input id="ke-target" placeholder="2026-08-22 10:00:00">' +
-      '<div class="row"><div><label>선발사(ms)</label><input id="ke-lead" type="number"></div>' +
-      '<div><label>재조회(ms)</label><input id="ke-retry" type="number"></div></div>' +
-      '<label>조회 버튼: <b id="ke-btn-label">(미지정)</b></label>' +
-      '<label>좌석 버튼: <b id="ke-seat-label">(미지정)</b></label>' +
-      '<div class="row">' +
-      '<button id="ke-pick" style="background:#666">조회 지정</button>' +
-      '<button id="ke-pick-seat" style="background:#666">좌석 지정</button></div>' +
+      '<label>선발사(ms)</label><input id="ke-lead" type="number">' +
       '<div class="row">' +
       '<button id="ke-sync" style="background:#666">시각 동기</button>' +
-      '<button id="ke-test" style="background:#666">발사 테스트</button></div>' +
-      '<div class="row">' +
-      '<button id="ke-auto" style="background:#2a7">자동클릭 ON</button>' +
-      '<button id="ke-scan" style="background:#666">버튼 확인</button></div>' +
+      '<button id="ke-auto" style="background:#2a7">자동클릭 ON</button></div>' +
+      '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
+      '<label>좌석 등급</label>' +
+      '<select id="ke-cabin" style="width:100%;box-sizing:border-box;padding:3px 5px;' +
+      'border:1px solid #bbb;border-radius:3px;font:inherit">' +
+      '<option value="일반석">일반석 (연습용)</option>' +
+      '<option value="프레스티지">프레스티지 (실전)</option>' +
+      '<option value="프리미엄">프리미엄</option>' +
+      '<option value="일등석">일등석</option>' +
+      '</select>' +
+      '<label>목표 날짜 <span style="color:#999">(비우면 검사 안 함)</span></label>' +
+      '<input id="ke-expect" placeholder="08월 17일">' +
+      '<label style="display:flex;align-items:center;gap:5px;margin-top:6px;color:#c00">' +
+      '<input type="checkbox" id="ke-allowpay" style="width:auto">' +
+      '결제하기까지 자동 (결제창 열림)</label>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
       '<label>예매 단계: <b id="ke-step-label">0단계</b></label>' +
       '<div class="row">' +
@@ -430,8 +328,6 @@
       '<button id="ke-export" style="background:#555;width:100%">내보내기 (steps.json 용)</button>' +
       '<div id="ke-rec-msg" style="font-size:11px;color:#606"></div>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
-      '<label>정시 동작: <b id="ke-mode-label"></b></label>' +
-      '<button id="ke-mode" style="background:#666;width:100%">동작 전환</button>' +
       '<button id="ke-rehearse" style="background:#c80;width:100%">연습 (10초 뒤 발사)</button>' +
       '<button id="ke-arm" style="background:#2a7;width:100%">▶ 대기 시작</button>' +
       '<div id="ke-status"></div><div id="ke-toast"></div>' +
@@ -447,33 +343,25 @@
       var b = root.querySelector('#ke-body');
       b.style.display = b.style.display === 'none' ? '' : 'none';
     };
-    root.querySelector('#ke-pick').onclick = function () { startPick('fire'); };
-    root.querySelector('#ke-pick-seat').onclick = function () { startPick('seat'); };
     root.querySelector('#ke-sync').onclick = function () { sync(true); };
-    root.querySelector('#ke-test').onclick = function () { fire('수동테스트'); };
     root.querySelector('#ke-rehearse').onclick = function () { rehearse(10); };
 
-    root.querySelector('#ke-mode').onclick = function () {
-      S.onOpen = S.onOpen === 'replay' ? 'search' : 'replay';
-      save(); render();
-    };
-
-    var REC = W.KE_REC || window.KE_REC;
-    if (REC) {
+    var R = REC();
+    if (R) {
       root.querySelector('#ke-rec').onclick = function () {
-        REC.state.recording ? REC.stop() : REC.record();
+        R.state.recording ? R.stop() : R.record();
         renderRec();
       };
       root.querySelector('#ke-play').onclick = function () {
-        if (REC.state.playing) { REC.pause('사용자 중지'); }
+        if (R.state.playing) { R.pause('사용자 중지'); }
         else {
           // 처음부터 다시 할지, 끊긴 데서 이어갈지
-          if (REC.state.idx > 0 && REC.state.idx < REC.state.steps.length) {
-            if (confirm(REC.state.idx + '단계까지 진행돼 있습니다.\n확인=이어서, 취소=처음부터')) {
+          if (R.state.idx > 0 && R.state.idx < R.state.steps.length) {
+            if (confirm(R.state.idx + '단계까지 진행돼 있습니다.\n확인=이어서, 취소=처음부터')) {
               /* 이어서 */
-            } else { REC.reset(); }
-          } else { REC.reset(); }
-          REC.play();
+            } else { R.reset(); }
+          } else { R.reset(); }
+          R.play();
         }
         renderRec();
       };
@@ -481,14 +369,32 @@
         var E = W.KE_EDIT || window.KE_EDIT;
         if (E) E.open(); else toast('편집기를 불러오지 못했습니다', true);
       };
-      root.querySelector('#ke-export').onclick = function () { REC.showExport(); };
+      root.querySelector('#ke-export').onclick = function () { R.showExport(); };
       root.querySelector('#ke-clear').onclick = function () {
-        if (confirm('녹화된 단계를 모두 지울까요?')) { REC.clear(); renderRec(); }
+        if (confirm('녹화된 단계를 모두 지울까요?')) { R.clear(); renderRec(); }
       };
-      REC.onChange(renderRec);
+      root.querySelector('#ke-cabin').onchange = function (e) {
+        R.state.cabin = e.target.value; R.save();
+        toast('좌석 등급: ' + e.target.value);
+      };
+      root.querySelector('#ke-expect').onchange = function (e) {
+        R.state.expectDate = e.target.value.trim(); R.save();
+        toast(R.state.expectDate
+          ? '목표 날짜 ' + R.state.expectDate + ' - 다르면 멈춥니다'
+          : '목표 날짜 검사 끔');
+      };
+      /* 기본은 꺼짐. 켜면 결제하기까지 눌러 결제창(네이버페이 등)을 띄운다.
+       * 결제창에서 다시 본인 인증이 필요하므로 여기서 바로 돈이 빠지지는 않지만,
+       * 되돌리기 어려운 지점이라 매번 눈에 보이게 체크하도록 둔다. */
+      root.querySelector('#ke-allowpay').onchange = function (e) {
+        R.state.allowPay = !!e.target.checked; R.save();
+        toast(R.state.allowPay
+          ? '결제하기까지 자동 - 결제창이 열립니다'
+          : '결제 직전에서 멈춥니다 (기본)', R.state.allowPay);
+      };
+      R.onChange(renderRec);
       renderRec();
     }
-    root.querySelector('#ke-scan').onclick = preview;
     root.querySelector('#ke-auto').onclick = function () {
       var A = W.KE_AUTO || window.KE_AUTO;
       if (!A) { toast('자동클릭 엔진이 없습니다', true); return; }
@@ -499,16 +405,10 @@
     };
     root.querySelector('#ke-target').onchange = function (e) { S.targetKst = e.target.value; save(); };
     root.querySelector('#ke-lead').onchange = function (e) { S.leadMs = +e.target.value || 0; save(); };
-    root.querySelector('#ke-retry').onchange = function (e) {
-      // 하한 800ms: 그 이하로 두드리면 봇 탐지 + 서버 부담
-      S.retryMs = Math.max(800, +e.target.value || 1200);
-      e.target.value = S.retryMs; save();
-    };
     root.querySelector('#ke-arm').onclick = function () {
       S.armed = !S.armed; save(); render();
-      if (S.armed) { beeped = false; schedule(); }
-      else { if (timer) clearTimeout(timer); if (retryTimer) clearTimeout(retryTimer);
-             timer = retryTimer = null; hunting = false; setStatus('정지됨'); }
+      if (S.armed) { schedule(); }
+      else { if (timer) clearTimeout(timer); timer = null; setStatus('정지됨'); }
     };
 
     render();
@@ -536,7 +436,7 @@
   setInterval(mount, 1000);   // 사라지면 1초 안에 복구
 
   expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount,
-                     rehearse: rehearse, preview: preview,
+                     rehearse: rehearse,
                      offset: function () { return offsetMs; } });
-  console.log('%c[KE_HUD] v1.0.0 loaded', 'color:#0b4da2;font-weight:bold');
+  console.log('%c[KE_HUD] v1.1.0 loaded', 'color:#0b4da2;font-weight:bold');
 })();

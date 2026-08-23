@@ -106,8 +106,6 @@ def main() -> int:
             pg.goto(START)
             pg.evaluate("""() => {
               sessionStorage.clear();
-              const H = window.KE_HUD.state;
-              H.onOpen = 'replay';
               window.KE_REC.reset();
               window.KE_HUD.rehearse(2);   // 2초 뒤 정시 발사
             }""")
@@ -124,6 +122,34 @@ def main() -> int:
             check(not st2['paid'], '결제하기는 안 눌림')
             check(not st2['armed'], '재생으로 넘어가며 HUD 재조회 루프는 해제됨')
             check(st2['idx'] == st2['total'], f"전 단계 완료 ({st2['idx']}/{st2['total']})")
+
+            # ---------- 4) 결제 단계 게이트 (allowPay) ----------
+            # 결제하기는 되돌리기 어려운 지점이라, 끄면 반드시 그 앞에서 멈춰야 한다.
+            def run_pay_step(allow: bool):
+                pg.goto(START)
+                pg.evaluate("""(allow) => {
+                  const R = window.KE_REC;
+                  R.pause('t'); R.state.playAfterReload = false;
+                  R.state.steps = [{sel: '#pay', text: '결제하기', tag: 'button',
+                                    url: location.pathname, selectorOnly: false}];
+                  R.state.allowPay = allow;
+                  R.reset(); R.save(); R.play();
+                }""", allow)
+                pg.wait_for_timeout(1500)
+                return pg.evaluate("() => ({paid: !!window.__paid, msg: window.KE_REC.state.message||'',"
+                                   " playing: window.KE_REC.state.playing})")
+
+            off = run_pay_step(False)
+            check(not off["paid"], "allowPay=false 면 결제하기를 누르지 않음")
+            check("결제" in off["msg"] and not off["playing"],
+                  "결제 직전에서 멈추고 사람을 부름", f"msg={off['msg']!r}")
+
+            # allowPay=true 면 게이트에 걸리지 않고 결제 버튼을 찾으러 간다.
+            # (이 픽스처에서 #pay 는 흐름 후반에야 생기므로 '눌렸는지' 가 아니라
+            #  '게이트에 막히지 않았는지' 를 본다)
+            on = run_pay_step(True)
+            check("결제 단계" not in on["msg"],
+                  "allowPay=true 면 결제 게이트에서 멈추지 않음", f"msg={on['msg']!r}")
         finally:
             ctx.close()
 

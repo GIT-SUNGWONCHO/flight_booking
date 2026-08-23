@@ -1,42 +1,40 @@
 {
-  "note": "koreanair.com 실측 녹화(일반석 KE901, 2027-08-16). 원본 22단계에서 아래를 정리함. 패널 [내보내기] 로 갱신 후 node build.mjs.",
-  "recordedAt": "2026-08-21 06:03:01",
+  "note": "koreanair.com 실측 녹화 (일반석 KE901, 대상일 2027-08-16 월). 06:03 1차 녹화를 08:57 2차 녹화로 재확인 후 병합.",
+  "recordedAt": "2026-08-21 08:57:27",
+  "cabin": "좌석 등급은 패널의 [좌석 등급] 선택으로 바꾼다 (연습=일반석, 실전=프레스티지). 해당 단계는 dynamicCabin=true 라서 라벨의 등급 이름 + '마일' 로 매번 다시 찾는다 - 편명/필요 마일리지/등급별 컨테이너 id 가 달라도 동작한다.",
   "cleanup": [
-    "제거: #flight-bonus00 / #rad-naverpay - label 클릭이 연결된 input 을 자동으로 누르므로 중복 기록된 것",
-    "제거: #submit-passenger-ADT-0 중복 1회 - 같은 버튼 연속 2회는 더블클릭 흔적",
-    "제거: 마일리지 적용 전에 눌린 #btn-payment 와 그때 뜬 경고팝업 확인 - 순서 오류의 산물",
-    "변경: 날짜 셀(#dep-fare-5-1) selectorOnly=true - 라벨에 '선택됨' 이 들어가 클릭 전에는 절대 매칭되지 않음"
+    "제거: label 클릭 시 연결된 input 이 같이 기록되는 중복 (#flight-bonus00, #rad-naverpay) - label 클릭이 이미 input 을 토글하므로 불필요",
+    "제거: #submit-passenger-ADT-0 연속 중복 1회 - 더블클릭 흔적",
+    "제거: 1번째 단계(달력 컨테이너 전체를 감싸는 클릭) - 06:03 녹화에선 #panel-0, 08:57 녹화에선 전혀 다른 구조 셀렉터로 잡힘. 셀렉터가 세션마다 안정적이지 않다는 뜻이라 실전에서 못 찾고 20초를 날릴 위험이 큼. URL 이동도 없어서 다음 단계(날짜 클릭) 동작에 꼭 필요한지 의심스러움",
+    "추가: #btnAwardUseMileageApply (적용) - 08:57 녹화에서 새로 잡힘. 마일리지 결제 적용 버튼, 06:03 녹화엔 빠져있던 실제로 필요한 단계",
+    "핵심 변경: 날짜 셀을 특정 텍스트/id 대신 dynamicDate=true 로 바꿈 - 마일리지는 매일 09:00 KST 에 하루치씩 새로 열려서(08/21 08:57엔 16일이 최신, 08/22엔 17일이 최신이었음을 실측으로 확인) 특정 날짜를 저장해두는 방식 자체가 구조적으로 매일 깨짐. 대신 재생 시점에 '[id^=\"dep-fare-\"] 중 요금등급 글자(일반석/프레스티지 등)가 붙은 것 중 DOM 순서상 마지막' 을 매번 다시 찾도록 util.js 에 findLatestOpenDate() 추가"
   ],
   "verify": [
-    "1번 #panel-0 (div) 은 스치듯 눌린 것으로 보임. 재생이 멀쩡하면 지워도 됨",
-    "13번 #btn-resv-agree-1 은 10번에서 이미 눌렸음. 토글이면 여기서 동의가 풀릴 수 있으니 재생 때 눈으로 확인",
-    "4번 항공편 라벨 텍스트가 '일반석 52,500 마일' 이라 프레스티지로 갈 때는 다시 지정해야 함"
+    "#btn-resv-agree-1(동의) 이 (7번/12번) 두 번 등장 - 두 세션 모두 동일 패턴이라 실수보다는 화면 재렌더로 실제 필요했을 가능성이 높음. 토글 버튼이라 잘못 재클릭하면 동의가 꺼질 수 있으니, 재생 테스트에서 마지막에 두 동의가 모두 켜진 채로 끝나는지 반드시 눈으로 확인",
+    "★ findLatestOpenDate() 는 '요금등급 글자가 붙어있으면 예약 가능'이라는 추측(실측 아님)에 기반함. 실제 사이트에서 KE_UTIL.findLatestOpenDate() 를 콘솔에 직접 쳐서 반환된 요소가 진짜 원하는 날짜인지, KE_UTIL.label(그요소) 로 라벨을 찍어 한 번은 눈으로 확인 필요",
+    "검색 버튼 셀렉터 앞부분에 세션마다 바뀌는 해시 id(ac0e9a2f7f9ead9dbd368853f47deb65...)가 붙어있어 실전에서는 거의 확실히 매칭 실패 -> 텍스트 폴백('검색')으로 잡힐 것. 이 단계는 '고정'(selectorOnly) 켜지 말 것"
   ],
   "steps": [
     {
-      "sel": "#panel-0",
-      "text": "2027년 7월 - 부터 2027년 8월 성수기 일반석 프리미엄석 프레스",
-      "tag": "div",
+      "dynamicDate": true,
+      "idPrefix": "dep-fare-",
+      "sel": "#dep-fare-5-1",
+      "text": "(날짜: 매번 최신 오픈일 자동 감지 - 16 08월 16일 (월) , 성수기 일반석 은 녹화 당시 예시)",
+      "tag": "td",
       "url": "/booking/calendar-fare-bonus",
       "selectorOnly": false
     },
     {
-      "sel": "#dep-fare-5-1",
-      "text": "16 08월 16일 (월) , 성수기 일반석 , 선택됨",
-      "tag": "td",
-      "url": "/booking/calendar-fare-bonus",
-      "selectorOnly": true
-    },
-    {
-      "sel": "ke-calendar-fare-bonus-main-cont.ng-star-inserted > ke-calendar-fare-bonus-main-pres.ng-star-inserted > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host",
+      "sel": "#ac0e9a2f7f9ead9dbd368853f47deb65CalendarFareBonusMain > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host",
       "text": "검색",
       "tag": "kds-button_1",
       "url": "/booking/calendar-fare-bonus",
       "selectorOnly": false
     },
     {
-      "sel": "#classEconomyList0 > div.flight-n__cabin-group.-bonus > div.flight-n__cabin-wrap.ng-star-inserted:nth-of-type(1) > label.flight-n__cabin-info.-bonus",
-      "text": "항공편명 KE901 일반석 52,500 마일",
+      "dynamicCabin": true,
+      "sel": "",
+      "text": "(좌석: 패널에서 고른 등급을 매번 다시 찾음 - 녹화 당시는 '항공편명 KE901 일반석 52,500 마일')",
       "tag": "label",
       "url": "/booking/select-award-flight/departure",
       "selectorOnly": false
@@ -112,16 +110,16 @@
       "selectorOnly": false
     },
     {
-      "sel": "ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted",
-      "text": "Npay",
-      "tag": "label",
+      "sel": "#btnAwardUseMileageApply",
+      "text": "적용",
+      "tag": "button",
       "url": "/payment/gate/RT/NR",
       "selectorOnly": false
     },
     {
-      "sel": "#btnAwardUseMileageApply",
-      "text": "적용",
-      "tag": "button",
+      "sel": "ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted",
+      "text": "Npay",
+      "tag": "label",
       "url": "/payment/gate/RT/NR",
       "selectorOnly": false
     },

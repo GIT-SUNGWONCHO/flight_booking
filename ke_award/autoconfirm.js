@@ -29,6 +29,9 @@
 
   if (W.KE_AUTO || window.KE_AUTO) return;
 
+  // util.js 가 없는 환경(Playwright 는 이 파일만 단독 주입)에서도 동작해야 하므로 없으면 무시.
+  var U = W.KE_UTIL || window.KE_UTIL;
+
   var CFG = {
     enabled: true,
 
@@ -162,13 +165,17 @@
     lastByLabel[label] = now;
     seen.add(el);
     clicks++;
-    try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
-    try {
-      el.click();
-    } catch (e) {
+    if (U) {
+      U.fireClick(el);
+    } else {
+      try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
       try {
-        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      } catch (e2) { return false; }
+        el.click();
+      } catch (e) {
+        try {
+          el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        } catch (e2) { return false; }
+      }
     }
     var rec = { t: new Date().toISOString().slice(11, 23), label: label, n: clicks };
     CFG.log.push(rec);
@@ -195,8 +202,20 @@
     });
   }
 
+  /* recorder.js 가 재생 중이면 그쪽이 이미 같은 확인/동의/스크롤 버튼을 정해진
+   * 순서로 누르고 있다. autoconfirm 이 동시에 끼어들면 recorder 보다 먼저 눌러
+   * 버려서 recorder 가 자기 단계의 요소를 못 찾고 20초씩 멈추는 경합이 생긴다.
+   * 재생 중엔 손을 떼고, 재생이 끝나면(완료/일시정지/결제대기) 다시 넘겨받는다. */
+  var REPLAY_GRACE_MS = 4000;   // 이보다 오래 같은 단계에서 막히면 예상 밖 모달로 보고 다시 끼어든다
+  function replaying() {
+    var R = W.KE_REC || window.KE_REC;
+    if (!R || !R.state || !R.state.playing) return false;
+    var stalled = (R.stalledMs && R.stalledMs()) || 0;
+    return stalled < REPLAY_GRACE_MS;
+  }
+
   function sweep() {
-    if (!CFG.enabled) return;
+    if (!CFG.enabled || replaying()) return;
     var roots = [document];
     // same-origin iframe (약관/결제 위젯이 iframe 인 경우)
     try {

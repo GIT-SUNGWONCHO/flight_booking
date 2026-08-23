@@ -30,14 +30,30 @@
    * 마일리지와 현금이 실제로 빠져나가는 지점이라 자동으로 넘기지 않는다. */
   var PAY = /결제하기|결제및발권|발권하기|구매하기|purchase|paynow/;
 
+  // "아래로 스크롤" 계열 단계. 클릭만으로는 불안해서 스크롤을 직접 한 번 더 밀어준다.
+  var SCROLLY = /아래로|스크롤|scroll/i;
+
   var S = {
     steps: [],
     recording: false,
     playing: false,
     idx: 0,
-    allowPay: false,      // true 로 바꾸면 결제까지 자동 (기본 false)
+    playAfterReload: false, // 새로고침이 끝난 뒤에 재생을 시작하라는 예약 (armForReload)
+    startedAt: 0,         // 발사 시각(ms). 단계별/총 소요시간 표시용
+    skipped: 0,           // resync 로 건너뛴 단계 수. 완료 보고를 정직하게 하기 위함
+    expectDate: '',       // 목표 날짜(예: "08월 17일"). 넣으면 자동 감지한 최신 오픈일이
+                          // 이것과 다를 때 클릭하지 않고 멈춘다 (엉뚱한 날 예매 방지)
+    cabin: '일반석',       // 좌석 등급. 연습은 '일반석', 실전은 '프레스티지'
+    /* 결제하기까지 자동으로 눌러 결제창(네이버페이 등)을 띄운다.
+     * 결제창에서 다시 본인 인증이 필요하므로 여기서 바로 돈이 빠지지는 않는다.
+     * 패널의 [결제하기까지 자동] 체크박스로 끌 수 있다. */
+    allowPay: true,
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
-    gapMs: 120            // 클릭 사이 최소 간격
+    resyncAfterMs: 700,   // 이만큼 막히면 "이미 지나간 단계인가?" 하고 뒤를 넘겨본다.
+                          // 자동클릭 엔진이 같은 버튼을 먼저 눌러버리는 일이 잦아서
+                          // 길게 잡으면 그만큼 그냥 버려진다
+    lookahead: 3,         // 몇 단계 앞까지 넘겨볼지
+    gapMs: 80             // 클릭 사이 최소 간격
   };
 
   function load() {
@@ -59,6 +75,17 @@
   function baked() { return (W.KE_STEPS_BAKED || window.KE_STEPS_BAKED || []); }
   if (!S.steps.length && baked().length) {
     S.steps = JSON.parse(JSON.stringify(baked()));
+    S.idx = 0;
+    save();
+  }
+
+  /* armForReload() 로 예약해둔 재생을 여기서 시작한다.
+   * 이 코드는 새 문서가 뜰 때마다 한 번 실행되므로, "새로고침이 끝난 뒤" 라는
+   * 시점이 정확히 보장된다. 낡은 화면에서 1단계를 눌러버리고 그 결과가 새로고침에
+   * 날아가는 사고를 막기 위한 것이다. */
+  if (S.playAfterReload) {
+    S.playAfterReload = false;
+    S.playing = true;
     S.idx = 0;
     save();
   }
@@ -118,24 +145,90 @@
     return PAY.test((step.text || '').replace(/[^0-9a-z가-힣]/gi, '').toLowerCase());
   }
 
+  /** 발사(재생 시작)부터 지금까지 몇 초. 새로고침을 건너도 이어지도록 저장해둔다. */
+  function elapsed() {
+    return S.startedAt ? (Date.now() - S.startedAt) / 1000 : 0;
+  }
+  function secs(v) { return v.toFixed(2) + 's'; }
+
   function play() {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return; }
     S.recording = false;
     S.playing = true;
+    if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.skipped = 0; }
     waitingSince = 0;
     save();
     log('재생 시작 (' + (S.idx + 1) + '/' + S.steps.length + ')');
   }
   function pause(why) {
     S.playing = false;
+    S.playAfterReload = false;
+    var took = elapsed();
     save();
-    log('재생 중지' + (why ? ' - ' + why : ''));
+    log('재생 중지' + (why ? ' - ' + why : '') + (took ? '  [총 ' + secs(took) + ']' : ''));
+  }
+
+  /* "새로고침한 다음 처음부터 재생" 예약. 지금 당장은 재생하지 않는다.
+   * play() 를 먼저 부르면 tick 이 낡은 화면에서 1단계를 눌러버리고, 이어지는
+   * 새로고침이 그 결과를 통째로 날린다 (정시 발사 때 날짜 선택이 사라지는 사고). */
+  function armForReload() {
+    if (!S.steps.length) { log('녹화된 단계가 없습니다'); return false; }
+    S.recording = false;
+    S.playing = false;
+    S.idx = 0;
+    S.playAfterReload = true;
+    S.startedAt = Date.now();   // 소요시간은 "발사 시점" 부터 센다 (새로고침 포함)
+    S.skipped = 0;
+    save();
+    log('새로고침 후 처음부터 재생 예약됨');
+    return true;
   }
   function reset() { S.idx = 0; save(); log('처음 단계로'); }
   function clear() { S.steps = []; S.idx = 0; S.playing = false; S.recording = false; save(); log('삭제됨'); }
 
+  /* 한 단계가 가리키는 요소를 찾는다.
+   * dynamicDate: 특정 날짜 텍스트/셀렉터 대신 "지금 예약 가능한 것 중 가장 나중 날짜".
+   *   마일리지는 매일 09:00 KST 에 하루치씩 새로 열려서, 녹화한 날짜는 다음날 못 쓴다.
+   * dynamicCabin: 패널에서 고른 좌석 등급의 항공편 카드 (연습=일반석 / 실전=프레스티지). */
+  function locate(step) {
+    if (step.dynamicDate) return U.findLatestOpenDate(step.idPrefix);
+    if (step.dynamicCabin) return U.findCabin(S.cabin);
+    return U.findEl(step.sel, step.text, { selectorOnly: step.selectorOnly });
+  }
+
+  /* 막혔을 때 "이미 지나간 단계"인지 확인한다.
+   * 자동클릭 엔진이 같은 확인 버튼을 먼저 눌러버리거나, 사이트가 화면 하나를 건너뛰면
+   * 녹화한 요소는 영영 안 나타난다. 그때 20초를 버리는 대신, 뒤쪽 단계의 요소가 이미
+   * 보이면 거기로 따라잡는다. 녹화는 정답 스크립트가 아니라 안내로 취급하는 쪽이 맞다.
+   * 단, 결제 단계로는 절대 건너뛰지 않는다 (순서대로 도달했을 때만 누른다). */
+  function resync() {
+    /* 모달이 떠 있으면 그 뒤 화면의 버튼들이 "보이기" 때문에, 그것만 보고 건너뛰면
+     * 팝업이 열린 채로 끝까지 달려가 "완료" 라고 거짓 보고를 한다(소리는 나는데
+     * 화면은 위험품 팝업에서 멈춰 있는 증상). 실제로 그 좌표에서 잡히는지(hittable)
+     * 까지 확인해야 한다. */
+    var end = Math.min(S.idx + 1 + S.lookahead, S.steps.length);
+    for (var k = S.idx + 1; k < end; k++) {
+      var nx = S.steps[k];
+      if (isPay(nx)) return false;
+      var nel = locate(nx);
+      if (nel && U.hittable(nel)) {
+        log('단계 ' + (S.idx + 1) + ' 건너뜀 (이미 지나간 것으로 보임) -> ' + (k + 1) + '단계로');
+        S.skipped = (S.skipped || 0) + (k - S.idx);
+        S.idx = k;
+        waitingSince = 0;
+        save();
+        return true;
+      }
+    }
+    return false;
+  }
+
   function tick() {
     if (!S.playing) return;
+    /* 문서가 아직 파싱 중이면 요소는 이미 DOM 에 있어도 그 페이지의 스크립트가
+     * 클릭 핸들러를 아직 안 붙였을 수 있다. 그 틈에 누르면 예외도 없이 아무 일도
+     * 안 일어난다. DOMContentLoaded 이후(interactive/complete)에만 진행한다. */
+    if (document.readyState === 'loading') return;
     var now = Date.now();
     if (now - lastClickAt < S.gapMs) return;
 
@@ -147,26 +240,57 @@
       return;
     }
 
-    var el = U.findEl(step.sel, step.text, { selectorOnly: step.selectorOnly });
+    var el = locate(step);
+
+    /* 목표 날짜를 지정해뒀으면, 자동 감지한 최신 오픈일이 그 날짜가 맞는지 확인한다.
+     * 안 맞으면 누르지 않고 멈춘다 - 엉뚱한 날짜로 마일리지가 빠지는 게 최악이다. */
+    if (step.dynamicDate && el && S.expectDate) {
+      var got = U.label(el);
+      if (got.indexOf(S.expectDate) === -1) {
+        pause('목표 날짜(' + S.expectDate + ')와 다릅니다 - 감지된 최신 오픈일: ' + got.slice(0, 30));
+        return;
+      }
+    }
     if (!el) {
       if (!waitingSince) waitingSince = now;
+      /* 스크롤 단계인데 버튼을 못 찾는 경우: 버튼이 스크롤에 밀려 사라졌거나 라벨이
+       * 바뀐 것일 수 있다. 그래도 팝업은 끝까지 내려야 [확인] 이 열리므로, 버튼과
+       * 무관하게 스크롤 자체는 계속 밀어준다. */
+      if (SCROLLY.test(step.text || '')) U.scrollToBottom();
+      if (now - waitingSince > S.resyncAfterMs && resync()) return;
       if (now - waitingSince > S.stepTimeoutMs) {
-        pause('단계 ' + (S.idx + 1) + ' 요소를 못 찾음: ' + (step.text || step.sel).slice(0, 30));
+        // 스크린샷 한 장으로 원인 파악이 되도록 패널 상태줄에 진단 요약을 그대로 붙인다.
+        var diag = step.dynamicDate
+          ? '최신 오픈일 셀을 못 찾음 (id 접두어: ' + (step.idPrefix || 'dep-fare-') + ')'
+          : step.dynamicCabin
+            ? '"' + S.cabin + '" 좌석이 이 화면에 없습니다 (그날 그 등급이 안 열렸을 수 있음)'
+            : U.diagnoseText(step.sel, step.selectorOnly ? '' : step.text);
+        pause('단계 ' + (S.idx + 1) + ' 요소를 못 찾음: ' + (step.text || step.sel || '').slice(0, 30) + ' [' + diag + ']');
       }
       return;
     }
 
     waitingSince = 0;
     lastClickAt = now;
-    try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
-    try { el.click(); } catch (e) {
-      try { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); }
-      catch (e2) { pause('클릭 실패: ' + e2); return; }
-    }
+    U.fireClick(el);
+
+    /* "아래로 스크롤" 은 버튼을 누르는 것만으로는 불안하다. 스크롤이 진행되면 버튼
+     * 자체가 위로 밀리거나 화면 밖으로 나가서 클릭이 빗나가고, 팝업이 끝까지 안 내려가
+     * [확인] 이 안 열린 채 멈춘다. 스크롤 영역을 직접 바닥까지 내려 확실히 한다. */
+    if (SCROLLY.test(step.text || '')) U.scrollToBottom();
+
     S.idx++;
     save();
-    log('재생 ' + S.idx + '/' + S.steps.length + ': ' + (step.text || step.sel).slice(0, 30));
-    if (S.idx >= S.steps.length) pause('전체 단계 완료');
+    log('재생 ' + S.idx + '/' + S.steps.length + ': ' + (step.text || step.sel).slice(0, 30)
+        + '  [' + secs(elapsed()) + ']');
+    if (S.idx >= S.steps.length) {
+      /* 건너뛴 단계가 있으면 "완료" 라고만 하면 안 된다. 자동클릭 엔진이 대신 눌러서
+       * 정상인 경우도 있지만, 화면이 실제로는 안 넘어갔을 수도 있다. 반드시 눈으로
+       * 확인하라고 알린다. */
+      pause(S.skipped
+        ? '단계 끝까지 진행 - 다만 ' + S.skipped + '단계를 건너뛰었습니다. 화면을 확인하세요'
+        : '전체 단계 완료');
+    }
   }
 
   // 페이지가 바뀌어도 localStorage 의 idx 에서 이어서 재생된다
@@ -241,11 +365,18 @@
     log('불러오기 ' + arr.length + '단계');
   }
 
+  /* 재생 중 같은 단계에서 이만큼(ms) 막히면 예상 밖 모달일 가능성이 높다고 보고
+   * autoconfirm.js 가 다시 끼어들도록 풀어준다 (정상 진행 중엔 계속 손을 떼서
+   * 같은 버튼을 두 엔진이 동시에 누르는 경합을 피한다). */
+  function stalledMs() { return waitingSince ? (Date.now() - waitingSince) : 0; }
+
   var API = {
     record: record, stop: stopRec, play: play, pause: pause,
+    armForReload: armForReload,
     reset: reset, clear: clear, state: S, save: save,
     exportJson: exportJson, showExport: showExport, importJson: importJson,
     removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,
+    stalledMs: stalledMs, elapsed: elapsed,
     loadBaked: function () {
       S.steps = JSON.parse(JSON.stringify(baked()));
       S.idx = 0; save();
