@@ -49,11 +49,16 @@
   }
 
   // 한국은 서머타임이 없으므로 KST = UTC+9 고정
+  /* 입력칸에 손으로 치다 보면 '2026-08-24-09:00:00' 처럼 날짜와 시각 사이가 하이픈이
+   * 되거나 공백이 여러 개 들어간다. 그 상태로 형식 오류만 띄우면 정작 9시에 발사가
+   * 안 걸린다. 숫자만 뽑아 재조립해서 웬만한 표기는 다 받아준다. */
   function targetMs() {
     if (!S.targetKst) return NaN;
-    var s = S.targetKst.trim().replace(' ', 'T');
-    if (s.length === 16) s += ':00';
-    return Date.parse(s + '+09:00');
+    var n = String(S.targetKst).match(/\d+/g);
+    if (!n || n.length < 5) return NaN;
+    var p = function (i, d) { return (n[i] === undefined ? d : ('0' + n[i]).slice(-2)); };
+    var iso = n[0] + '-' + p(1) + '-' + p(2) + 'T' + p(3) + ':' + p(4) + ':' + p(5, '00');
+    return Date.parse(iso + '+09:00');
   }
 
   /* Date 헤더는 1초 해상도라 그대로 쓰면 ±500ms 오차가 난다.
@@ -226,10 +231,14 @@
     var msg = root.querySelector('#ke-rec-msg');
     if (lab) {
       var el = R.elapsed ? R.elapsed() : 0;
-      lab.textContent = st.steps.length + '단계'
+      /* 어디서 온 단계인지 항상 보이게 한다. 브라우저에 남은 옛날 녹화가 도는데
+       * 그걸 모르고 실전에 들어가는 게 제일 위험하다. */
+      var src = st.source === 'local' ? '직접 녹화' : '내장';
+      lab.textContent = st.steps.length + '단계 (' + src + ')'
         + (st.playing ? ' - 재생 중 ' + (st.idx + 1) + '/' + st.steps.length
                       : (st.idx ? ' (' + st.idx + '까지 진행됨)' : ''))
         + (el ? '  ' + el.toFixed(1) + 's' : '');
+      lab.style.color = st.source === 'local' ? '#a0f' : '#0b4da2';
     }
     if (rec) {
       rec.textContent = st.recording ? '■ 녹화중지' : '● 녹화';

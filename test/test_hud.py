@@ -71,10 +71,20 @@ def main() -> int:
             pg.click("#ke-auto")
             check(pg.evaluate("window.KE_AUTO.enabled") is True, "토글로 다시 ON")
 
-            # 녹화가 없으면 발사하지 않고 안내만 한다
-            pg.evaluate("() => { window.KE_REC.clear(); window.KE_HUD.rehearse(2); }")
+            # 단계가 하나도 없으면 발사하지 않고 안내만 한다.
+            # clear() 는 이제 내장본을 복원하므로(그게 의도) 빈 상태는 직접 만든다.
+            pg.evaluate("""() => {
+              window.KE_REC.state.steps = [];
+              window.KE_HUD.rehearse(2);
+            }""")
             check(pg.evaluate("window.KE_HUD.state.armed") is False,
-                  "녹화가 없으면 무장하지 않음")
+                  "단계가 없으면 무장하지 않음")
+
+            # clear() 는 비우는 게 아니라 내장본으로 되돌려야 한다
+            pg.evaluate("window.KE_REC.clear()")
+            st = pg.evaluate("() => ({n: KE_REC.state.steps.length, src: KE_REC.state.source})")
+            check(st["n"] == pg.evaluate("KE_REC.bakedCount()") and st["src"] == "baked",
+                  f"삭제는 내장본을 복원 (실제 {st})")
 
             # armForReload 는 "예약"만 해야 한다. 여기서 바로 재생이 돌면 낡은 화면에서
             # 1단계(날짜)를 눌러버리고, 이어지는 새로고침이 그 선택을 날린다.

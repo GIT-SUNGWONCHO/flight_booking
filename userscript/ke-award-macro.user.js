@@ -694,7 +694,9 @@ try {
                           // 자동클릭 엔진이 같은 버튼을 먼저 눌러버리는 일이 잦아서
                           // 길게 잡으면 그만큼 그냥 버려진다
     lookahead: 3,         // 몇 단계 앞까지 넘겨볼지
-    gapMs: 80             // 클릭 사이 최소 간격
+    gapMs: 80,            // 클릭 사이 최소 간격
+    source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
+    bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
 
   function load() {
@@ -712,12 +714,35 @@ try {
   load();
 
   /* 빌드 시 steps.json 에서 구워 넣은 기본 단계.
-   * 이 브라우저에 녹화본이 없을 때만 쓴다 (직접 녹화한 게 항상 우선). */
+   *
+   * 우선순위: 검토를 거쳐 git 에 올린 steps.json 이 브라우저에 남은 녹화보다 세다.
+   * 예전에는 반대였는데, 새 스크립트를 붙여넣어도 브라우저에 남아있던 옛날 녹화가
+   * 계속 이겨서 정리 전 단계로 돌아가는 사고가 났다.
+   *
+   * 그렇다고 매번 덮으면 방금 녹화한 게 새로고침마다 날아간다. 그래서 내장본의
+   * 지문을 같이 저장해두고, 지문이 바뀔 때(=새 빌드를 붙여넣었을 때)만 덮는다.
+   * 지문이 같으면 이 브라우저에서 녹화/편집한 내용을 그대로 둔다. */
   function baked() { return (W.KE_STEPS_BAKED || window.KE_STEPS_BAKED || []); }
-  if (!S.steps.length && baked().length) {
+
+  function sigOf(steps) {
+    var s = JSON.stringify(steps || []);
+    var h = 5381;
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (steps || []).length + ':' + (h >>> 0).toString(36);
+  }
+
+  function adoptBaked(why) {
     S.steps = JSON.parse(JSON.stringify(baked()));
+    S.bakedSig = sigOf(baked());
+    S.source = 'baked';
     S.idx = 0;
     save();
+    if (why) console.log('%c[KE_REC] 내장 단계 ' + S.steps.length + '개 적용 (' + why + ')',
+                         'color:#a0f;font-weight:bold');
+  }
+
+  if (baked().length && S.bakedSig !== sigOf(baked())) {
+    adoptBaked(S.steps.length ? '스크립트가 갱신되어 이전 녹화를 대체함' : '최초 적용');
   }
 
   /* armForReload() 로 예약해둔 재생을 여기서 시작한다.
@@ -765,6 +790,7 @@ try {
   document.addEventListener('click', onClick, true);
 
   function record() {
+    S.source = 'local';       // 이제부터는 이 브라우저에서 만든 것
     S.steps = [];
     S.recording = true;
     S.playing = false;
@@ -825,7 +851,13 @@ try {
     return true;
   }
   function reset() { S.idx = 0; save(); log('처음 단계로'); }
-  function clear() { S.steps = []; S.idx = 0; S.playing = false; S.recording = false; save(); log('삭제됨'); }
+  /* '삭제' 는 빈 상태로 두는 것보다 내장본으로 되돌리는 게 쓸모 있다.
+   * 녹화가 꼬였을 때 되돌아갈 기준점이 생긴다. */
+  function clear() {
+    S.playing = false; S.recording = false; S.idx = 0;
+    if (baked().length) { adoptBaked('삭제 -> 내장본 복원'); log('내장 단계 ' + S.steps.length + '개로 되돌렸습니다'); }
+    else { S.steps = []; S.source = 'local'; save(); log('삭제됨'); }
+  }
 
   /* 한 단계가 가리키는 요소를 찾는다.
    * dynamicDate: 특정 날짜 텍스트/셀렉터 대신 "지금 예약 가능한 것 중 가장 나중 날짜".
@@ -974,6 +1006,7 @@ try {
   // ---- 단계 편집 ----------------------------------------------------------
   function removeStep(i) {
     if (i < 0 || i >= S.steps.length) return;
+    S.source = 'local';
     var gone = S.steps.splice(i, 1)[0];
     if (S.idx > i) S.idx--;
     save(); log('삭제: ' + (gone.text || gone.sel).slice(0, 24));
@@ -986,12 +1019,14 @@ try {
   }
   function insertAt(i, step) {
     i = Math.max(0, Math.min(i, S.steps.length));
+    S.source = 'local';
     S.steps.splice(i, 0, step);
     if (S.idx > i) S.idx++;
     save(); log('추가: ' + (step.text || step.sel).slice(0, 24) + ' (' + (i + 1) + '번째)');
   }
   function setStep(i, patch) {
     if (!S.steps[i]) return;
+    S.source = 'local';
     for (var k in patch) S.steps[i][k] = patch[k];
     save(); emit();
   }
@@ -1002,7 +1037,7 @@ try {
     for (var i = 0; i < arr.length; i++) {
       if (!arr[i] || (!arr[i].sel && !arr[i].text)) throw new Error((i + 1) + '번째에 sel/text 가 없습니다');
     }
-    S.steps = arr; S.idx = 0; save();
+    S.steps = arr; S.idx = 0; S.source = 'local'; save();
     log('불러오기 ' + arr.length + '단계');
   }
 
@@ -1019,10 +1054,10 @@ try {
     removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,
     stalledMs: stalledMs, elapsed: elapsed,
     loadBaked: function () {
-      S.steps = JSON.parse(JSON.stringify(baked()));
-      S.idx = 0; save();
+      adoptBaked('수동 요청');
       log('내장 단계 ' + S.steps.length + '개를 불러왔습니다');
     },
+    bakedCount: function () { return baked().length; },
     list: function () { console.table(S.steps); return S.steps; },
     onChange: function (fn) { listeners.push(fn); }
   };
@@ -1263,11 +1298,16 @@ try {
   }
 
   // 한국은 서머타임이 없으므로 KST = UTC+9 고정
+  /* 입력칸에 손으로 치다 보면 '2026-08-24-09:00:00' 처럼 날짜와 시각 사이가 하이픈이
+   * 되거나 공백이 여러 개 들어간다. 그 상태로 형식 오류만 띄우면 정작 9시에 발사가
+   * 안 걸린다. 숫자만 뽑아 재조립해서 웬만한 표기는 다 받아준다. */
   function targetMs() {
     if (!S.targetKst) return NaN;
-    var s = S.targetKst.trim().replace(' ', 'T');
-    if (s.length === 16) s += ':00';
-    return Date.parse(s + '+09:00');
+    var n = String(S.targetKst).match(/\d+/g);
+    if (!n || n.length < 5) return NaN;
+    var p = function (i, d) { return (n[i] === undefined ? d : ('0' + n[i]).slice(-2)); };
+    var iso = n[0] + '-' + p(1) + '-' + p(2) + 'T' + p(3) + ':' + p(4) + ':' + p(5, '00');
+    return Date.parse(iso + '+09:00');
   }
 
   /* Date 헤더는 1초 해상도라 그대로 쓰면 ±500ms 오차가 난다.
@@ -1440,10 +1480,14 @@ try {
     var msg = root.querySelector('#ke-rec-msg');
     if (lab) {
       var el = R.elapsed ? R.elapsed() : 0;
-      lab.textContent = st.steps.length + '단계'
+      /* 어디서 온 단계인지 항상 보이게 한다. 브라우저에 남은 옛날 녹화가 도는데
+       * 그걸 모르고 실전에 들어가는 게 제일 위험하다. */
+      var src = st.source === 'local' ? '직접 녹화' : '내장';
+      lab.textContent = st.steps.length + '단계 (' + src + ')'
         + (st.playing ? ' - 재생 중 ' + (st.idx + 1) + '/' + st.steps.length
                       : (st.idx ? ' (' + st.idx + '까지 진행됨)' : ''))
         + (el ? '  ' + el.toFixed(1) + 's' : '');
+      lab.style.color = st.source === 'local' ? '#a0f' : '#0b4da2';
     }
     if (rec) {
       rec.textContent = st.recording ? '■ 녹화중지' : '● 녹화';

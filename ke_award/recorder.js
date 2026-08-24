@@ -53,7 +53,9 @@
                           // 자동클릭 엔진이 같은 버튼을 먼저 눌러버리는 일이 잦아서
                           // 길게 잡으면 그만큼 그냥 버려진다
     lookahead: 3,         // 몇 단계 앞까지 넘겨볼지
-    gapMs: 80             // 클릭 사이 최소 간격
+    gapMs: 80,            // 클릭 사이 최소 간격
+    source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
+    bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
 
   function load() {
@@ -71,12 +73,35 @@
   load();
 
   /* 빌드 시 steps.json 에서 구워 넣은 기본 단계.
-   * 이 브라우저에 녹화본이 없을 때만 쓴다 (직접 녹화한 게 항상 우선). */
+   *
+   * 우선순위: 검토를 거쳐 git 에 올린 steps.json 이 브라우저에 남은 녹화보다 세다.
+   * 예전에는 반대였는데, 새 스크립트를 붙여넣어도 브라우저에 남아있던 옛날 녹화가
+   * 계속 이겨서 정리 전 단계로 돌아가는 사고가 났다.
+   *
+   * 그렇다고 매번 덮으면 방금 녹화한 게 새로고침마다 날아간다. 그래서 내장본의
+   * 지문을 같이 저장해두고, 지문이 바뀔 때(=새 빌드를 붙여넣었을 때)만 덮는다.
+   * 지문이 같으면 이 브라우저에서 녹화/편집한 내용을 그대로 둔다. */
   function baked() { return (W.KE_STEPS_BAKED || window.KE_STEPS_BAKED || []); }
-  if (!S.steps.length && baked().length) {
+
+  function sigOf(steps) {
+    var s = JSON.stringify(steps || []);
+    var h = 5381;
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (steps || []).length + ':' + (h >>> 0).toString(36);
+  }
+
+  function adoptBaked(why) {
     S.steps = JSON.parse(JSON.stringify(baked()));
+    S.bakedSig = sigOf(baked());
+    S.source = 'baked';
     S.idx = 0;
     save();
+    if (why) console.log('%c[KE_REC] 내장 단계 ' + S.steps.length + '개 적용 (' + why + ')',
+                         'color:#a0f;font-weight:bold');
+  }
+
+  if (baked().length && S.bakedSig !== sigOf(baked())) {
+    adoptBaked(S.steps.length ? '스크립트가 갱신되어 이전 녹화를 대체함' : '최초 적용');
   }
 
   /* armForReload() 로 예약해둔 재생을 여기서 시작한다.
@@ -124,6 +149,7 @@
   document.addEventListener('click', onClick, true);
 
   function record() {
+    S.source = 'local';       // 이제부터는 이 브라우저에서 만든 것
     S.steps = [];
     S.recording = true;
     S.playing = false;
@@ -184,7 +210,13 @@
     return true;
   }
   function reset() { S.idx = 0; save(); log('처음 단계로'); }
-  function clear() { S.steps = []; S.idx = 0; S.playing = false; S.recording = false; save(); log('삭제됨'); }
+  /* '삭제' 는 빈 상태로 두는 것보다 내장본으로 되돌리는 게 쓸모 있다.
+   * 녹화가 꼬였을 때 되돌아갈 기준점이 생긴다. */
+  function clear() {
+    S.playing = false; S.recording = false; S.idx = 0;
+    if (baked().length) { adoptBaked('삭제 -> 내장본 복원'); log('내장 단계 ' + S.steps.length + '개로 되돌렸습니다'); }
+    else { S.steps = []; S.source = 'local'; save(); log('삭제됨'); }
+  }
 
   /* 한 단계가 가리키는 요소를 찾는다.
    * dynamicDate: 특정 날짜 텍스트/셀렉터 대신 "지금 예약 가능한 것 중 가장 나중 날짜".
@@ -333,6 +365,7 @@
   // ---- 단계 편집 ----------------------------------------------------------
   function removeStep(i) {
     if (i < 0 || i >= S.steps.length) return;
+    S.source = 'local';
     var gone = S.steps.splice(i, 1)[0];
     if (S.idx > i) S.idx--;
     save(); log('삭제: ' + (gone.text || gone.sel).slice(0, 24));
@@ -345,12 +378,14 @@
   }
   function insertAt(i, step) {
     i = Math.max(0, Math.min(i, S.steps.length));
+    S.source = 'local';
     S.steps.splice(i, 0, step);
     if (S.idx > i) S.idx++;
     save(); log('추가: ' + (step.text || step.sel).slice(0, 24) + ' (' + (i + 1) + '번째)');
   }
   function setStep(i, patch) {
     if (!S.steps[i]) return;
+    S.source = 'local';
     for (var k in patch) S.steps[i][k] = patch[k];
     save(); emit();
   }
@@ -361,7 +396,7 @@
     for (var i = 0; i < arr.length; i++) {
       if (!arr[i] || (!arr[i].sel && !arr[i].text)) throw new Error((i + 1) + '번째에 sel/text 가 없습니다');
     }
-    S.steps = arr; S.idx = 0; save();
+    S.steps = arr; S.idx = 0; S.source = 'local'; save();
     log('불러오기 ' + arr.length + '단계');
   }
 
@@ -378,10 +413,10 @@
     removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,
     stalledMs: stalledMs, elapsed: elapsed,
     loadBaked: function () {
-      S.steps = JSON.parse(JSON.stringify(baked()));
-      S.idx = 0; save();
+      adoptBaked('수동 요청');
       log('내장 단계 ' + S.steps.length + '개를 불러왔습니다');
     },
+    bakedCount: function () { return baked().length; },
     list: function () { console.table(S.steps); return S.steps; },
     onChange: function (fn) { listeners.push(fn); }
   };
