@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8"><title>모달 가림 시뮬레이터</title>
+<style>body{font:14px sans-serif;padding:20px} button{padding:8px 14px;margin:4px}
+ #veil{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;
+       align-items:center;justify-content:center;z-index:10}
+ #veil.on{display:flex}
+ .box{background:#fff;padding:24px;border-radius:8px}</style>
+<body>
+<!-- 실측: 모달이 떠 있는데 그 뒤 버튼들이 계속 눌려서, 화면은 모달에 멈춘 채
+     단계만 줄줄이 "성공" 으로 찍히고 결제까지 눌렀다고 보고했다. -->
+<button id="open">동의</button>
+<button id="behind">결제하기</button>
+<div id="veil"><div class="box"><h3>운임 규정 상세 보기</h3>
+  <button id="close">확인</button></div></div>
+<script>
+window.__behindClicks = 0;
+document.getElementById('open').onclick = function(){ document.getElementById('veil').className = 'on'; };
+document.getElementById('behind').onclick = function(){ window.__behindClicks++; };
+document.getElementById('close').onclick = function(){ document.getElementById('veil').className = ''; };
+</script>
+</body>

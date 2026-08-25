@@ -203,6 +203,7 @@
    * 우리 패널은 시계를 50ms 마다 다시 그리므로 그 변화는 세지 않는다. */
   var lastMutAt = 0;
   var retries = 0;
+  var blockedEl = null;   // 찾았지만 무언가에 가려 못 누르는 요소
   var OURS = '#ke-hud, #ke-editor, #ke-export';
   new MutationObserver(function (muts) {
     for (var i = 0; i < muts.length; i++) {
@@ -228,7 +229,10 @@
    * (연락처 확인을 눌렀는데 화면이 그대로였고 다음 단계가 나타나지 않음).
    * 왜 무시됐는지는 밖에서 알 수 없으므로, 원인을 따지지 않고 다시 누른다. */
   function retryPrevClick(now) {
-    if (S.idx === 0 || retries >= 3) return false;
+    // 횟수로 끊지 않는다. 단계 제한시간(stepTimeoutMs)까지 계속 눌러보고,
+    // 그래도 안 되면 아래에서 멈추면서 사람을 부른다.
+    if (S.idx === 0) return false;
+    if (blockedEl) return false;   // 가려서 못 누르는 거면 다시 눌러봤자다
     if (now - lastClickAt < S.retryClickMs) return false;
     var prev = S.steps[S.idx - 1];
     if (!retryable(prev)) return false;
@@ -237,8 +241,8 @@
     retries++;
     lastClickAt = now;
     U.fireClick(el);
-    log('단계 ' + S.idx + ' 가 안 나타나 직전 단계를 다시 누름 ('
-        + retries + '/3): ' + String(prev.text || prev.sel).slice(0, 24));
+    log('단계 ' + (S.idx + 1) + ' 가 안 나타나 직전 단계를 다시 누름 (' + retries + '회째): '
+        + String(prev.text || prev.sel).slice(0, 24));
     return true;
   }
 
@@ -362,6 +366,18 @@
 
     var el = locate(step);
 
+    /* 찾았어도 "지금 누를 수 있는" 상태여야 한다.
+     * 모달이 떠 있으면 그 뒤 버튼도 크기·visibility 상으로는 멀쩡히 보이지만 실제
+     * 클릭은 모달이 먹는다. 그대로 진행하면 화면은 모달에서 멈춰 있는데 단계만
+     * 줄줄이 "성공" 으로 찍히고 결제까지 눌렀다고 보고한다(실측에서 그랬다).
+     * 여기서 막아두면 최소한 거짓 완료는 없다. */
+    if (el && !U.hittable(el)) {
+      blockedEl = el;
+      el = null;
+    } else {
+      blockedEl = null;
+    }
+
     /* 목표 날짜를 지정해뒀으면, 자동 감지한 최신 오픈일이 그 날짜가 맞는지 확인한다.
      * 안 맞으면 누르지 않고 멈춘다 - 엉뚱한 날짜로 마일리지가 빠지는 게 최악이다. */
     if (step.dynamicDate && el && S.expectDate) {
@@ -381,7 +397,10 @@
       if (now - waitingSince > S.retryClickMs && retryPrevClick(now)) return;
       if (now - waitingSince > S.stepTimeoutMs) {
         // 스크린샷 한 장으로 원인 파악이 되도록 패널 상태줄에 진단 요약을 그대로 붙인다.
-        var diag = step.dynamicDate
+        var diag = blockedEl
+          ? '무언가에 가려 누를 수 없습니다 (모달이 떠 있는지 확인하세요): '
+            + String(U.label(blockedEl)).slice(0, 20)
+          : step.dynamicDate
           ? '최신 오픈일 셀을 못 찾음 (id 접두어: ' + (step.idPrefix || 'dep-fare-') + ')'
           : step.dynamicCabin
             ? '"' + S.cabin + '" 좌석이 이 화면에 없습니다 (그날 그 등급이 안 열렸을 수 있음)'
