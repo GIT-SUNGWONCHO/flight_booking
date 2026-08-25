@@ -17,39 +17,44 @@ function Invoke-Stage([string]$Title, [scriptblock]$Body, [string]$OnFail) {
   if ($LASTEXITCODE -ne 0) { throw $OnFail }
 }
 
-Invoke-Stage "[1/8] 라벨 판정 유닛테스트" { node test/test_autoconfirm.js } "유닛테스트 실패"
+Invoke-Stage "[1/9] 라벨 판정 유닛테스트" { node test/test_autoconfirm.js } "유닛테스트 실패"
 
-Invoke-Stage "[2/8] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트" { node test/test_util.js } "유틸 유닛테스트 실패"
+Invoke-Stage "[2/9] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트" { node test/test_util.js } "유틸 유닛테스트 실패"
 
-Invoke-Stage "[3/8] 유저스크립트 빌드" {
+Invoke-Stage "[3/9] 유저스크립트 빌드" {
   node build.mjs
   node --check userscript/ke-award-macro.user.js
 } "빌드 실패"
 
 Reset-Browsers
-Invoke-Stage "[4/8] 브라우저 통합테스트" {
+Invoke-Stage "[4/9] 브라우저 통합테스트" {
   & ./.venv/Scripts/python.exe test/test_integration.py
 } "통합테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[5/8] 유저스크립트(HUD) 테스트" {
+Invoke-Stage "[5/9] 유저스크립트(HUD) 테스트" {
   & ./.venv/Scripts/python.exe test/test_hud.py
 } "HUD 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[6/8] 녹화/재생 테스트" {
+Invoke-Stage "[6/9] 녹화/재생 테스트" {
   & ./.venv/Scripts/python.exe test/test_recorder.py
 } "녹화/재생 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[7/8] 단계 편집 테스트" {
+Invoke-Stage "[7/9] 단계 편집 테스트" {
   & ./.venv/Scripts/python.exe test/test_editor.py
 } "편집 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[8/8] 단계 우선순위 테스트" {
+Invoke-Stage "[8/9] 단계 우선순위 테스트" {
   & ./.venv/Scripts/python.exe test/test_precedence.py
 } "우선순위 테스트 실패"
+
+Reset-Browsers
+Invoke-Stage "[9/9] 자동클릭 정지 / 건너뜀 보고 테스트" {
+  & ./.venv/Scripts/python.exe test/test_autosuspend.py
+} "자동클릭 정지 테스트 실패"
 
 Reset-Browsers
 Write-Host "`n전체 통과" -ForegroundColor Green

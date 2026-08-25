@@ -121,17 +121,22 @@ def main() -> int:
             # 의미 있는 쪽은 하한이다: 초 단위 절삭 때문에 T-0 보다 일찍 쏘는 회귀를 잡는다.
             check(elapsed > 1.9, f"T-0 이전에 미리 쏘지 않음 (실제 {elapsed:.2f}s)")
 
-            pg.wait_for_function("() => !!window.__done", timeout=20000)
-            st = pg.evaluate("() => ({done: window.__done, aborted: window.__aborted || null,"
-                             " unchecked: window.__unchecked || null,"
+            # 재생이 끝나면 자동클릭은 꺼진 채로 둔다. 그래서 이 픽스처의 모달 체인은
+            # 재생 종료 후 아무도 안 누른다 - 의도된 동작이다(결제 직후 뜬 팝업을
+            # 사람이 보기 전에 치우지 않기 위함). 여기서는 재생 자체를 검증한다.
+            pg.wait_for_function("() => !window.KE_REC.state.playing", timeout=20000)
+            st = pg.evaluate("() => ({idx: KE_REC.state.idx, total: KE_REC.state.steps.length,"
+                             " skipped: KE_REC.state.skipped,"
+                             " aborted: window.__aborted || null,"
+                             " auto: window.KE_AUTO.enabled,"
                              " armed: window.KE_HUD.state.armed})")
-            check(st["done"] == EXPECTED, "연습 발사로 모달 체인까지 통과", f"실제: {st['done']}")
+            check(st["idx"] == st["total"], f"녹화 단계를 끝까지 재생 ({st['idx']}/{st['total']})")
+            check(not st["skipped"], f"건너뛴 단계 없음 (실제 {st['skipped']})")
             check(st["aborted"] is None, "오클릭 없음", f"눌림: {st['aborted']}")
-            check(st["unchecked"] is None, "체크박스 먼저 체크")
+            check(st["auto"] is False, "재생이 끝나도 자동클릭은 꺼진 채로 둔다")
             check(st["armed"] is False, "재생으로 넘어가며 HUD 무장은 해제됨")
 
-            # 재생이 멈추면 사람을 부른다 (소리는 못 보지만 제목은 확인 가능)
-            pg.wait_for_function("() => !window.KE_REC.state.playing", timeout=10000)
+            pg.wait_for_timeout(300)
             pg.wait_for_timeout(300)
             # 끝까지 간 경우와 막힌 경우를 제목으로 구분해야 한다
             # (같게 알리면 막혀서 멈춘 걸 완료로 오해한다)

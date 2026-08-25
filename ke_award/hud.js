@@ -257,8 +257,11 @@
       var m = st.message || '';
       // 사용자가 직접 정지한 건 알릴 필요 없다
       if (!/사용자 중지/.test(m)) {
+        /* 건너뜀 여부는 메시지 문구가 아니라 숫자로 판정한다.
+         * 문구 매칭에 기대면 '건너뛰었습니다' -> '건너뜀' 처럼 표현만 바뀌어도
+         * 조용히 ★완료★ 로 잘못 보고하게 된다. */
         var ok = st.steps.length > 0 && st.idx >= st.steps.length
-                 && !/건너뛰|못 찾|다릅니다/.test(m);
+                 && !st.skipped && !/못 찾|다릅니다/.test(m);
         notify(m, ok);
       }
     }
@@ -407,7 +410,11 @@
     root.querySelector('#ke-auto').onclick = function () {
       var A = W.KE_AUTO || window.KE_AUTO;
       if (!A) { toast('자동클릭 엔진이 없습니다', true); return; }
-      A.enabled ? A.off() : A.on();
+      var R3 = REC();
+      // 재생이 꺼둔 상태는 저장돼 있어서, 여기서 켤 때 그것도 같이 풀어줘야
+      // 다음 페이지에서 다시 꺼지지 않는다
+      if (A.enabled) { A.off(); if (R3) { R3.state.autoOff = true; R3.save(); } }
+      else { R3 && R3.resumeAuto ? R3.resumeAuto() : A.on(); }
       render();
       toast('자동클릭 ' + (A.enabled ? 'ON - 확인/동의 모달을 자동 통과합니다'
                                     : 'OFF - 아무것도 누르지 않습니다'));

@@ -625,7 +625,7 @@ try {
 // ---------- steps ----------
 try {
 (function () {
-  var S = [{"dynamicDate":true,"idPrefix":"dep-fare-","sel":"#dep-fare-5-1","text":"(날짜: 매번 최신 오픈일 자동 감지 - 16 08월 16일 (월) , 성수기 일반석 은 녹화 당시 예시)","tag":"td","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"sel":"#ac0e9a2f7f9ead9dbd368853f47deb65CalendarFareBonusMain > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host","text":"검색","tag":"kds-button_1","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"dynamicCabin":true,"sel":"","text":"(좌석: 패널에서 고른 등급을 매번 다시 찾음 - 녹화 당시는 '항공편명 KE901 일반석 52,500 마일')","tag":"label","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#payment-widget > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button > kds-button_1.--wds-ui.ui-button__host","text":"다음","tag":"kds-button_1","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#submit-passenger-ADT-0","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#submit-contact","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-3","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnAwardUseMileageApply","text":"적용","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted","text":"Npay","tag":"label","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-payment","text":"결제하기 새 창 열림","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false}];
+  var S = [{"dynamicDate":true,"idPrefix":"dep-fare-","sel":"#dep-fare-5-1","text":"(날짜: 매번 최신 오픈일 자동 감지 - 16 08월 16일 (월) , 성수기 일반석 은 녹화 당시 예시)","tag":"td","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"sel":"#ac0e9a2f7f9ead9dbd368853f47deb65CalendarFareBonusMain > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host","text":"검색","tag":"kds-button_1","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"dynamicCabin":true,"sel":"","text":"(좌석: 패널에서 고른 등급을 매번 다시 찾음 - 녹화 당시는 '항공편명 KE901 일반석 52,500 마일')","tag":"label","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#payment-widget > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button > kds-button_1.--wds-ui.ui-button__host","text":"다음","tag":"kds-button_1","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#submit-passenger-ADT-0","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#submit-contact","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-3","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnAwardUseMileageApply","text":"적용","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted","text":"Npay","tag":"label","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-payment","text":"결제하기 새 창 열림","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false}];
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
   try { W.KE_STEPS_BAKED = S; } catch (e) {}
@@ -682,6 +682,9 @@ try {
     playAfterReload: false, // 새로고침이 끝난 뒤에 재생을 시작하라는 예약 (armForReload)
     startedAt: 0,         // 발사 시각(ms). 단계별/총 소요시간 표시용
     skipped: 0,           // resync 로 건너뛴 단계 수. 완료 보고를 정직하게 하기 위함
+    skippedList: [],      // 어떤 단계를 건너뛰었는지. 개수만 알려주면 판단을 못 한다
+    message: '',          // 패널 상태줄. 여기 선언이 없으면 load() 가 걸러내서
+                          // 마지막 단계가 페이지를 이동시킨 경우 왜 멈췄는지가 사라진다
     expectDate: '',       // 목표 날짜(예: "08월 17일"). 넣으면 자동 감지한 최신 오픈일이
                           // 이것과 다를 때 클릭하지 않고 멈춘다 (엉뚱한 날 예매 방지)
     cabin: '일반석',       // 좌석 등급. 연습은 '일반석', 실전은 '프레스티지'
@@ -695,6 +698,8 @@ try {
                           // 길게 잡으면 그만큼 그냥 버려진다
     lookahead: 3,         // 몇 단계 앞까지 넘겨볼지
     gapMs: 80,            // 클릭 사이 최소 간격
+    autoOff: false,       // 자동클릭을 꺼둔 상태인지. 새 문서마다 엔진이 기본값으로
+                          // 다시 켜지므로 저장해두지 않으면 이동 후 되살아난다
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
     bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
@@ -754,6 +759,13 @@ try {
     S.playing = true;
     S.idx = 0;
     save();
+    // 새 문서에서도 자동클릭은 꺼둔 채로 시작한다 (suspendAuto 는 아래에 정의됨)
+    setTimeout(function () { suspendAuto('새로고침 후 재생'); }, 0);
+  }
+
+  // 재생 중이 아니어도, 사용자가 다시 켜기 전까지는 꺼진 상태를 유지한다
+  if (S.autoOff) {
+    setTimeout(reapplyAutoOff, 0);
   }
 
   var listeners = [];
@@ -818,11 +830,44 @@ try {
   }
   function secs(v) { return v.toFixed(2) + 's'; }
 
+  /* 재생 중에는 자동클릭 엔진을 멈춘다.
+   * 실측 로그에서 둘이 서로를 밟았다: 6단계(5.86s) 직후 KE_AUTO 가 확인/동의를 먼저
+   * 눌러 위험물 팝업을 띄웠고, 재생은 7단계 버튼이 팝업에 가려 hittable 하지 않아
+   * 10초를 그냥 기다렸다(7단계가 16.65s 에야 실행). 재생이 끝난 뒤에도 KE_AUTO 가
+   * 아래로스크롤/확인을 눌렀다 - 결제 버튼을 누른 직후에 뜬 팝업을 사람이 보기도
+   * 전에 치워버린 것이다.
+   * 녹화된 순서가 있으면 추측 클릭은 도움이 아니라 방해다. */
+  function suspendAuto(why) {
+    S.autoOff = true;
+    save();
+    var A = W.KE_AUTO || window.KE_AUTO;
+    if (A && A.enabled) {
+      A.enabled = false;
+      log('자동클릭 일시 정지 (' + why + ') - 재생이 순서를 알고 있으므로 추측 클릭은 방해가 된다');
+    }
+  }
+
+  /* 새 문서에서 엔진이 기본값(ON)으로 다시 뜨므로 저장된 상태를 매번 다시 적용한다.
+   *
+   * 다만 완전히 죽여두면 녹화에 없는 예상 못한 팝업이 떴을 때 아무도 못 치운다.
+   * 재생이 "막혀 있는 동안"(요소를 못 찾고 기다리는 중) 만 자동클릭을 열어준다.
+   * 그 순간엔 재생이 아무것도 누르지 않으므로 서로 밟을 일이 없고, 팝업이 치워지면
+   * 재생이 곧바로 이어진다. 재생이 끝난 뒤에는 다시 닫는다 - 결제 버튼을 누른
+   * 직후에 뜬 팝업을 사람이 보기도 전에 치워버리면 안 된다. */
+  function reapplyAutoOff() {
+    if (!S.autoOff) return;
+    var A = W.KE_AUTO || window.KE_AUTO;
+    if (!A) return;
+    var stalled = S.playing && waitingSince && (Date.now() - waitingSince) > S.resyncAfterMs;
+    A.enabled = !!stalled;
+  }
+
   function play() {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return; }
     S.recording = false;
     S.playing = true;
-    if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.skipped = 0; }
+    suspendAuto('재생 시작');
+    if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.skipped = 0; S.skippedList = []; }
     waitingSince = 0;
     save();
     log('재생 시작 (' + (S.idx + 1) + '/' + S.steps.length + ')');
@@ -844,8 +889,10 @@ try {
     S.playing = false;
     S.idx = 0;
     S.playAfterReload = true;
+    suspendAuto('발사');
     S.startedAt = Date.now();   // 소요시간은 "발사 시점" 부터 센다 (새로고침 포함)
     S.skipped = 0;
+    S.skippedList = [];
     save();
     log('새로고침 후 처음부터 재생 예약됨');
     return true;
@@ -887,6 +934,10 @@ try {
       if (nel && U.hittable(nel)) {
         log('단계 ' + (S.idx + 1) + ' 건너뜀 (이미 지나간 것으로 보임) -> ' + (k + 1) + '단계로');
         S.skipped = (S.skipped || 0) + (k - S.idx);
+        if (!S.skippedList) S.skippedList = [];
+        for (var j = S.idx; j < k; j++) {
+          S.skippedList.push((j + 1) + '번 "' + String(S.steps[j].text || S.steps[j].sel).slice(0, 18) + '"');
+        }
         S.idx = k;
         waitingSince = 0;
         save();
@@ -898,6 +949,7 @@ try {
 
   function tick() {
     if (!S.playing) return;
+    reapplyAutoOff();   // 사이트가 SPA 로 문서를 갈아끼워도 꺼진 상태를 지킨다
     /* 문서가 아직 파싱 중이면 요소는 이미 DOM 에 있어도 그 페이지의 스크립트가
      * 클릭 핸들러를 아직 안 붙였을 수 있다. 그 틈에 누르면 예외도 없이 아무 일도
      * 안 일어난다. DOMContentLoaded 이후(interactive/complete)에만 진행한다. */
@@ -961,7 +1013,8 @@ try {
        * 정상인 경우도 있지만, 화면이 실제로는 안 넘어갔을 수도 있다. 반드시 눈으로
        * 확인하라고 알린다. */
       pause(S.skipped
-        ? '단계 끝까지 진행 - 다만 ' + S.skipped + '단계를 건너뛰었습니다. 화면을 확인하세요'
+        ? '단계 끝까지 진행 - 건너뜀 ' + S.skipped + '개: '
+            + (S.skippedList || []).join(', ') + '. 화면을 확인하세요'
         : '전체 단계 완료');
     }
   }
@@ -1050,6 +1103,11 @@ try {
     record: record, stop: stopRec, play: play, pause: pause,
     armForReload: armForReload,
     reset: reset, clear: clear, state: S, save: save,
+    resumeAuto: function () {
+      S.autoOff = false; save();
+      var A = W.KE_AUTO || window.KE_AUTO;
+      if (A) A.enabled = true;
+    },
     exportJson: exportJson, showExport: showExport, importJson: importJson,
     removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,
     stalledMs: stalledMs, elapsed: elapsed,
@@ -1506,8 +1564,11 @@ try {
       var m = st.message || '';
       // 사용자가 직접 정지한 건 알릴 필요 없다
       if (!/사용자 중지/.test(m)) {
+        /* 건너뜀 여부는 메시지 문구가 아니라 숫자로 판정한다.
+         * 문구 매칭에 기대면 '건너뛰었습니다' -> '건너뜀' 처럼 표현만 바뀌어도
+         * 조용히 ★완료★ 로 잘못 보고하게 된다. */
         var ok = st.steps.length > 0 && st.idx >= st.steps.length
-                 && !/건너뛰|못 찾|다릅니다/.test(m);
+                 && !st.skipped && !/못 찾|다릅니다/.test(m);
         notify(m, ok);
       }
     }
@@ -1656,7 +1717,11 @@ try {
     root.querySelector('#ke-auto').onclick = function () {
       var A = W.KE_AUTO || window.KE_AUTO;
       if (!A) { toast('자동클릭 엔진이 없습니다', true); return; }
-      A.enabled ? A.off() : A.on();
+      var R3 = REC();
+      // 재생이 꺼둔 상태는 저장돼 있어서, 여기서 켤 때 그것도 같이 풀어줘야
+      // 다음 페이지에서 다시 꺼지지 않는다
+      if (A.enabled) { A.off(); if (R3) { R3.state.autoOff = true; R3.save(); } }
+      else { R3 && R3.resumeAuto ? R3.resumeAuto() : A.on(); }
       render();
       toast('자동클릭 ' + (A.enabled ? 'ON - 확인/동의 모달을 자동 통과합니다'
                                     : 'OFF - 아무것도 누르지 않습니다'));
