@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8"><title>헛클릭 시뮬레이터</title>
+<style>body{font:14px sans-serif;padding:20px} button{padding:8px 14px;margin:4px}
+ .on{background:#222;color:#fff}</style>
+<body>
+<!-- 실측에서 난 상황: 연락처 확인을 눌렀는데 사이트가 섹션을 다시 그리는 중이라
+     아무 일도 일어나지 않았고, 다음 단계(동의)가 화면에 없어 재생이 멈췄다.
+     여기서는 "첫 클릭은 무시하고 두 번째부터 먹는" 버튼으로 그 상황을 만든다. -->
+<button id="contact">확인</button>
+<button id="agree" aria-pressed="false">동의</button>
+<div id="after"></div>
+<script>
+var tries = 0;
+window.__contactTries = 0;
+window.__agreeClicks = 0;
+
+document.getElementById('contact').onclick = function () {
+  tries++; window.__contactTries = tries;
+  // 첫 클릭은 DOM 을 전혀 건드리지 않는다 = 헛클릭
+  if (tries < 2) return;
+  document.getElementById('after').innerHTML = '<button id="next">다음</button>';
+  window.__advanced = true;
+};
+
+// 토글: 누를 때마다 상태가 뒤집히고 DOM 이 바뀐다
+document.getElementById('agree').onclick = function () {
+  window.__agreeClicks++;
+  var on = this.getAttribute('aria-pressed') === 'true';
+  this.setAttribute('aria-pressed', on ? 'false' : 'true');
+  this.className = on ? '' : 'on';
+  if (on) window.__agreeTurnedOff = true;   // 다시 눌러 꺼진 경우 = 사고
+};
+</script>
+</body>

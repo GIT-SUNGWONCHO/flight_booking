@@ -193,6 +193,46 @@
   var waitingSince = 0;
   var lastClickAt = 0;
 
+  /* 클릭이 "먹었는지" 판정하기 위한 DOM 변화 카운터.
+   * 사이트가 섹션을 다시 그리는 중에 누르면 예외도 없이 아무 일도 안 일어난다
+   * (실측: 연락처 확인을 눌렀는데 화면이 그대로였고, 다음 단계인 동의 영역이
+   *  아예 안 나타나 재생이 멈췄다). 누른 뒤 DOM 이 전혀 안 움직였으면 헛클릭이다. */
+  var mutCount = 0;
+  var mutAtClick = -1;
+  var retriedFor = -1;   // 어느 단계에 대해 재클릭을 했는지 (중복 방지)
+  /* 우리 패널은 시계를 50ms 마다 다시 그린다. 그것까지 세면 DOM 은 항상 "움직이는"
+   * 상태가 되어 헛클릭을 영원히 감지하지 못한다. 우리 UI 안의 변화는 빼고 센다. */
+  var OURS = '#ke-hud, #ke-editor, #ke-export';
+  new MutationObserver(function (muts) {
+    for (var i = 0; i < muts.length; i++) {
+      var t = muts[i].target;
+      var el = t && t.nodeType === 1 ? t : (t && t.parentElement);
+      if (el && el.closest && el.closest(OURS)) continue;
+      mutCount++;
+      return;
+    }
+  }).observe(document, { childList: true, subtree: true, attributes: true });
+
+  /* 직전 클릭이 헛클릭이었으면 한 번 더 눌러본다.
+   * DOM 이 전혀 안 바뀐 경우에만 한다 - 토글 버튼(동의)을 다시 눌러 꺼버리면
+   * 안 되는데, 토글이 먹었다면 DOM 이 반드시 바뀌므로 여기 걸리지 않는다. */
+  function retryPrevClick(now) {
+    if (S.idx === 0 || retriedFor === S.idx) return false;
+    if (mutAtClick < 0 || mutCount !== mutAtClick) return false;   // 뭔가 바뀌었으면 헛클릭 아님
+    if (now - lastClickAt < 800) return false;
+    var prev = S.steps[S.idx - 1];
+    if (!prev || isPay(prev)) return false;
+    var el = locate(prev);
+    if (!el) return false;
+    retriedFor = S.idx;
+    lastClickAt = now;
+    mutAtClick = mutCount;
+    U.fireClick(el);
+    log('단계 ' + S.idx + ' 클릭이 먹지 않은 것 같아 다시 누름: '
+        + String(prev.text || prev.sel).slice(0, 24));
+    return true;
+  }
+
   function isPay(step) {
     return PAY.test((step.text || '').replace(/[^0-9a-z가-힣]/gi, '').toLowerCase());
   }
@@ -321,6 +361,7 @@
        * 무관하게 스크롤 자체는 계속 밀어준다. */
       if (SCROLLY.test(step.text || '')) U.scrollToBottom();
       if (now - waitingSince > S.resyncAfterMs && resync()) return;
+      if (now - waitingSince > S.resyncAfterMs && retryPrevClick(now)) return;
       if (now - waitingSince > S.stepTimeoutMs) {
         // 스크린샷 한 장으로 원인 파악이 되도록 패널 상태줄에 진단 요약을 그대로 붙인다.
         var diag = step.dynamicDate
@@ -340,6 +381,7 @@
      * 누르기 직전의 open 기록을 잡아두고, 잠시 뒤 새 기록이 생겼는지로 판정한다. */
     var payBefore = isPay(step) ? ((S.lastOpen && S.lastOpen.at) || 0) : null;
 
+    mutAtClick = mutCount;
     U.fireClick(el);
 
     if (payBefore !== null) {
@@ -357,6 +399,7 @@
     if (SCROLLY.test(step.text || '')) U.scrollToBottom();
 
     S.idx++;
+    retriedFor = -1;
     save();
     log('재생 ' + S.idx + '/' + S.steps.length + ': ' + (step.text || step.sel).slice(0, 30)
         + '  [' + secs(elapsed()) + ']');

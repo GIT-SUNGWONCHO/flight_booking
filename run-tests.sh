@@ -24,39 +24,43 @@ reset_browsers() {
 
 stage() { printf '\n\033[36m%s\033[0m\n' "$1"; }
 
-stage "[1/9] 라벨 판정 유닛테스트"
+stage "[1/10] 라벨 판정 유닛테스트"
 node test/test_autoconfirm.js
 
-stage "[2/9] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트"
+stage "[2/10] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트"
 node test/test_util.js
 
-stage "[3/9] 유저스크립트 빌드"
+stage "[3/10] 유저스크립트 빌드"
 node build.mjs
 node --check userscript/ke-award-macro.user.js
 
 reset_browsers
-stage "[4/9] 브라우저 통합테스트"
+stage "[4/10] 브라우저 통합테스트"
 "$PY" test/test_integration.py
 
 reset_browsers
-stage "[5/9] 유저스크립트(HUD) 테스트"
+stage "[5/10] 유저스크립트(HUD) 테스트"
 "$PY" test/test_hud.py
 
 reset_browsers
-stage "[6/9] 녹화/재생 테스트"
+stage "[6/10] 녹화/재생 테스트"
 "$PY" test/test_recorder.py
 
 reset_browsers
-stage "[7/9] 단계 편집 테스트"
+stage "[7/10] 단계 편집 테스트"
 "$PY" test/test_editor.py
 
 reset_browsers
-stage "[8/9] 단계 우선순위 테스트"
+stage "[8/10] 단계 우선순위 테스트"
 "$PY" test/test_precedence.py
 
 reset_browsers
-stage "[9/9] 건너뜀 보고 / 추측클릭 제거 확인"
+stage "[9/10] 건너뜀 보고 / 추측클릭 제거 확인"
 "$PY" test/test_skipreport.py
+
+reset_browsers
+stage "[10/10] 헛클릭 감지·재시도 테스트"
+"$PY" test/test_deadclick.py
 
 reset_browsers
 printf '\n\033[32m전체 통과\033[0m\n'
