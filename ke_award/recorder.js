@@ -63,6 +63,9 @@
                           // 길게 잡으면 그만큼 그냥 버려진다
     lookahead: 3,         // 몇 단계 앞까지 넘겨볼지
     gapMs: 80,            // 클릭 사이 최소 간격
+    settleMs: 250,        // 이만큼 화면이 잠잠해야 다음 단계를 누른다
+    maxSettleMs: 2500,    // 계속 바뀌기만 하면 이 시간 뒤에는 그냥 누른다
+    retryClickMs: 1200,   // 막혔을 때 직전 단계를 다시 눌러보는 간격
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
     bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
@@ -193,43 +196,49 @@
   var waitingSince = 0;
   var lastClickAt = 0;
 
-  /* 클릭이 "먹었는지" 판정하기 위한 DOM 변화 카운터.
-   * 사이트가 섹션을 다시 그리는 중에 누르면 예외도 없이 아무 일도 안 일어난다
-   * (실측: 연락처 확인을 눌렀는데 화면이 그대로였고, 다음 단계인 동의 영역이
-   *  아예 안 나타나 재생이 멈췄다). 누른 뒤 DOM 이 전혀 안 움직였으면 헛클릭이다. */
-  var mutCount = 0;
-  var mutAtClick = -1;
-  var retriedFor = -1;   // 어느 단계에 대해 재클릭을 했는지 (중복 방지)
-  /* 우리 패널은 시계를 50ms 마다 다시 그린다. 그것까지 세면 DOM 은 항상 "움직이는"
-   * 상태가 되어 헛클릭을 영원히 감지하지 못한다. 우리 UI 안의 변화는 빼고 센다. */
+  /* 앞 단계의 결과가 화면에 반영되기 전에 다음 단계를 누르면 클릭이 그냥 무시된다.
+   * 실측에서 승객정보 확인(6.12s) 0.2초 뒤에 연락처 확인(6.32s)을 눌렀고, 그 클릭이
+   * 먹지 않아 이후 단계가 전부 막혔다. 사람이 녹화할 때는 이 사이가 몇 초였다.
+   * 그래서 "화면이 잠잠해질 때까지" 기다렸다가 다음을 누른다.
+   * 우리 패널은 시계를 50ms 마다 다시 그리므로 그 변화는 세지 않는다. */
+  var lastMutAt = 0;
+  var retries = 0;
   var OURS = '#ke-hud, #ke-editor, #ke-export';
   new MutationObserver(function (muts) {
     for (var i = 0; i < muts.length; i++) {
       var t = muts[i].target;
       var el = t && t.nodeType === 1 ? t : (t && t.parentElement);
       if (el && el.closest && el.closest(OURS)) continue;
-      mutCount++;
+      lastMutAt = Date.now();
       return;
     }
   }).observe(document, { childList: true, subtree: true, attributes: true });
 
-  /* 직전 클릭이 헛클릭이었으면 한 번 더 눌러본다.
-   * DOM 이 전혀 안 바뀐 경우에만 한다 - 토글 버튼(동의)을 다시 눌러 꺼버리면
-   * 안 되는데, 토글이 먹었다면 DOM 이 반드시 바뀌므로 여기 걸리지 않는다. */
+  /* 다시 눌러도 되는 단계인가.
+   * 확인/다음/검색 같은 제출 버튼은 두 번 눌러도 결과가 같지만, 동의/체크는 토글이라
+   * 다시 누르면 꺼진다. steps.json 에서 단계별로 noRetry 로 못박을 수도 있다. */
+  var TOGGLEY = /동의|체크|선택|agree|check/i;
+  function retryable(step) {
+    if (!step || step.noRetry || isPay(step)) return false;
+    return !TOGGLEY.test(step.text || '');
+  }
+
+  /* 막혀 있으면 직전 단계를 다시 눌러본다.
+   * 사이트가 앞 단계를 처리하는 중에 눌러 클릭이 그냥 무시되는 일이 실제로 있었다
+   * (연락처 확인을 눌렀는데 화면이 그대로였고 다음 단계가 나타나지 않음).
+   * 왜 무시됐는지는 밖에서 알 수 없으므로, 원인을 따지지 않고 다시 누른다. */
   function retryPrevClick(now) {
-    if (S.idx === 0 || retriedFor === S.idx) return false;
-    if (mutAtClick < 0 || mutCount !== mutAtClick) return false;   // 뭔가 바뀌었으면 헛클릭 아님
-    if (now - lastClickAt < 800) return false;
+    if (S.idx === 0 || retries >= 3) return false;
+    if (now - lastClickAt < S.retryClickMs) return false;
     var prev = S.steps[S.idx - 1];
-    if (!prev || isPay(prev)) return false;
+    if (!retryable(prev)) return false;
     var el = locate(prev);
     if (!el) return false;
-    retriedFor = S.idx;
+    retries++;
     lastClickAt = now;
-    mutAtClick = mutCount;
     U.fireClick(el);
-    log('단계 ' + S.idx + ' 클릭이 먹지 않은 것 같아 다시 누름: '
-        + String(prev.text || prev.sel).slice(0, 24));
+    log('단계 ' + S.idx + ' 가 안 나타나 직전 단계를 다시 누름 ('
+        + retries + '/3): ' + String(prev.text || prev.sel).slice(0, 24));
     return true;
   }
 
@@ -248,6 +257,7 @@
     S.recording = false;
     S.playing = true;
     if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.skipped = 0; S.skippedList = []; }
+    retries = 0;
     waitingSince = 0;
     save();
     log('재생 시작 (' + (S.idx + 1) + '/' + S.steps.length + ')');
@@ -343,6 +353,13 @@
       return;
     }
 
+    /* 앞 단계 결과가 반영되기 전에 누르면 클릭이 무시된다. 화면이 잠잠해질 때까지
+     * 기다린다. 계속 바뀌기만 하는 화면도 있으므로 상한을 둔다. */
+    if (S.idx > 0 && lastClickAt) {
+      var quiet = now - Math.max(lastMutAt, lastClickAt);
+      if (quiet < S.settleMs && now - lastClickAt < S.maxSettleMs) return;
+    }
+
     var el = locate(step);
 
     /* 목표 날짜를 지정해뒀으면, 자동 감지한 최신 오픈일이 그 날짜가 맞는지 확인한다.
@@ -361,7 +378,7 @@
        * 무관하게 스크롤 자체는 계속 밀어준다. */
       if (SCROLLY.test(step.text || '')) U.scrollToBottom();
       if (now - waitingSince > S.resyncAfterMs && resync()) return;
-      if (now - waitingSince > S.resyncAfterMs && retryPrevClick(now)) return;
+      if (now - waitingSince > S.retryClickMs && retryPrevClick(now)) return;
       if (now - waitingSince > S.stepTimeoutMs) {
         // 스크린샷 한 장으로 원인 파악이 되도록 패널 상태줄에 진단 요약을 그대로 붙인다.
         var diag = step.dynamicDate
@@ -381,7 +398,6 @@
      * 누르기 직전의 open 기록을 잡아두고, 잠시 뒤 새 기록이 생겼는지로 판정한다. */
     var payBefore = isPay(step) ? ((S.lastOpen && S.lastOpen.at) || 0) : null;
 
-    mutAtClick = mutCount;
     U.fireClick(el);
 
     if (payBefore !== null) {
@@ -399,7 +415,7 @@
     if (SCROLLY.test(step.text || '')) U.scrollToBottom();
 
     S.idx++;
-    retriedFor = -1;
+    retries = 0;
     save();
     log('재생 ' + S.idx + '/' + S.steps.length + ': ' + (step.text || step.sel).slice(0, 30)
         + '  [' + secs(elapsed()) + ']');

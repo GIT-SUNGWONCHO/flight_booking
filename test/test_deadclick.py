@@ -60,10 +60,11 @@ def main() -> int:
             }""")
             pg.wait_for_function("() => !window.KE_REC.state.playing", timeout=20000)
             st = pg.evaluate("() => ({tries: window.__contactTries, advanced: !!window.__advanced,"
-                             " idx: KE_REC.state.idx, total: KE_REC.state.steps.length,"
+                             " ignored: window.__ignored, idx: KE_REC.state.idx, total: KE_REC.state.steps.length,"
                              " msg: KE_REC.state.message})")
-            check(st["tries"] == 2, f"헛클릭을 감지해 한 번 더 누름 (실제 {st['tries']}회)")
-            check(st["advanced"], "재시도 덕분에 화면이 넘어감")
+            check(st["tries"] >= 2, f"무시된 클릭을 다시 눌렀다 (총 {st['tries']}회)")
+            check(st["advanced"], "결국 화면이 넘어감")
+            check(st["ignored"] >= 1, f"첫 클릭은 실제로 무시됐다 (무시 {st['ignored']}회)")
             check(st["idx"] == st["total"], f"끝까지 재생 ({st['idx']}/{st['total']})")
 
             # --- 2) 토글은 재시도 대상이 아니다 ---

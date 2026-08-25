@@ -11,13 +11,17 @@
 <div id="after"></div>
 <script>
 var tries = 0;
+var busyUntil = Date.now() + 900;   // 앞 단계를 처리하는 중 (실제 사이트의 서버 왕복)
 window.__contactTries = 0;
 window.__agreeClicks = 0;
+window.__ignored = 0;
+
+// 처리 중에 누르면 예외 없이 그냥 무시된다. 화면은 계속 미세하게 바뀐다(Angular 흉내).
+setInterval(function () { document.body.dataset.t = String(Date.now()); }, 60);
 
 document.getElementById('contact').onclick = function () {
   tries++; window.__contactTries = tries;
-  // 첫 클릭은 DOM 을 전혀 건드리지 않는다 = 헛클릭
-  if (tries < 2) return;
+  if (Date.now() < busyUntil) { window.__ignored++; return; }
   document.getElementById('after').innerHTML = '<button id="next">다음</button>';
   window.__advanced = true;
 };
