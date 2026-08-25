@@ -335,293 +335,6 @@ try {
 }
 
 
-// ---------- autoconfirm ----------
-try {
-/* ============================================================
- * autoconfirm.js  --  안내사항 모달 즉시 통과 엔진
- *
- * 동작 원리
- *  1) MutationObserver 로 DOM 변화를 감시 -> 모달이 그려지는 즉시 반응
- *  2) rAF 루프를 보조로 돌려 CSS transition 으로 뒤늦게 보이는 버튼도 포착
- *  3) 버튼 라벨을 "정규화 후 정확히" 매칭 (부분일치 X)
- *     - 결제/발권 화면에서 엉뚱한 버튼을 누르는 사고를 막기 위함
- *  4) 클릭 금지 목록(never)이 항상 우선
- *
- * 콘솔 튜닝
- *  KE_AUTO.scan()              현재 화면의 버튼 후보 미리보기 (클릭 안 함)
- *  KE_AUTO.click.push("라벨")  라벨 추가
- *  KE_AUTO.off() / .on()       토글
- *  KE_AUTO.dump()              클릭 로그
- * ============================================================ */
-(function () {
-  'use strict';
-
-  /* Tampermonkey 는 @grant 가 걸리면 샌드박스에서 실행된다. 그 경우 window 에 붙인
-   * 값은 페이지(=F12 콘솔)에서 안 보이므로 unsafeWindow 에도 같이 노출해야 한다.
-   * Playwright 주입 시에는 unsafeWindow 가 없으니 window 로 폴백. */
-  var W = window;
-  try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  function expose(k, v) {
-    try { W[k] = v; } catch (e) {}
-    if (W !== window) { try { window[k] = v; } catch (e) {} }
-  }
-
-  if (W.KE_AUTO || window.KE_AUTO) return;
-
-  // util.js 가 없는 환경(Playwright 는 이 파일만 단독 주입)에서도 동작해야 하므로 없으면 무시.
-  var U = W.KE_UTIL || window.KE_UTIL;
-
-  var CFG = {
-    enabled: true,
-
-    // 정규화(소문자/공백·기호 제거) 후 "정확히" 일치하면 클릭
-    click: [
-      '확인', '확인하였습니다', '동의', '동의함', '동의합니다',
-      '전체동의', '모두동의', '전체선택', '위내용을확인하였습니다',
-      '다음', '다음단계', '계속', '계속하기', '진행',
-      '아래로스크롤', '아래로', '스크롤',   // 위험품 안내 팝업: 끝까지 내려야 확인이 열림
-      '예', 'ok', 'confirm', 'agree', 'iagree', 'continue', 'next', 'accept', 'yes'
-    ],
-
-    /* 토글성 버튼: 이미 켜져 있으면 누르면 안 된다.
-     * (확인 및 동의 2개 중 하나가 이미 동의된 상태로 나오는 화면이 있는데,
-     *  거기서 다시 누르면 동의가 풀려 결제로 못 넘어간다) */
-    toggleLabels: ['동의', '동의함', '동의합니다', '전체동의', '모두동의', '전체선택'],
-
-    // 이 문자열이 "포함"되면 무조건 스킵 (click 목록보다 우선)
-    never: [
-      '취소', '닫기', '이전', '뒤로', '아니오', '아니요', '거부', '동의하지',
-      '삭제', '로그아웃', '재검색', '다시검색', '변경', '초기화', '홈으로',
-      'cancel', 'close', 'back', 'no', 'decline', 'reject', 'logout', 'reset'
-    ],
-
-    // 최종 발권/결제 버튼은 기본 OFF. 마지막 한 번은 사람이 누르는 게 안전.
-    // 켜려면 콘솔에서  KE_AUTO.autoFinal = true
-    autoFinal: false,
-    finalLabels: ['발권', '결제', '구매', '예약완료', '마일리지공제', 'purchase', 'issueticket'],
-
-    checkboxes: true,   // 필수 동의 체크박스 자동 체크
-    cooldownMs: 350,    // 같은 라벨 재클릭 최소 간격 (무한루프 방지)
-    maxClicks: 60,      // 세션당 총 클릭 상한 (폭주 안전장치)
-    log: []
-  };
-
-  // 아래 설치 과정에서 예외가 나도 API 는 남도록 먼저 노출한다
-  expose('KE_AUTO', CFG);
-
-  var clicks = 0;
-  var lastByLabel = Object.create(null);
-  var seen = new WeakSet();
-
-  // 기호를 하나씩 블랙리스트로 지우면  »  ›  →  같은 글리프를 놓친다.
-  // 한글 음절 / 영문 / 숫자만 남기는 화이트리스트가 안전.
-  var KEEP = /[^0-9a-z가-힣]/g;
-
-  function norm(s) {
-    return (s || '').toLowerCase().replace(KEEP, '');
-  }
-
-  function labelOf(el) {
-    var t = el.innerText || el.textContent || '';
-    if (!t.trim()) t = el.value || el.getAttribute('aria-label') || el.title || '';
-    return norm(t).slice(0, 40);
-  }
-
-  function visible(el) {
-    if (!el.isConnected) return false;
-    if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
-    var r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) return false;
-    var st = getComputedStyle(el);
-    if (st.visibility === 'hidden' || st.display === 'none') return false;
-    if (parseFloat(st.opacity || '1') < 0.05) return false;
-    if (st.pointerEvents === 'none') return false;
-    return true;
-  }
-
-  var SEL = 'button, a[role="button"], a[href="#"], a[href^="javascript"], ' +
-            '[role="button"], input[type="button"], input[type="submit"], ' +
-            '.btn, .button, [class*="btn-confirm"], [class*="btnConfirm"]';
-
-  function candidates(root) {
-    var out = [];
-    try { out = Array.prototype.slice.call(root.querySelectorAll(SEL)); } catch (e) { return out; }
-    // open shadow root 내부까지 훑는다 (일부 위젯이 웹컴포넌트)
-    try {
-      root.querySelectorAll('*').forEach(function (n) {
-        if (n.shadowRoot) out = out.concat(candidates(n.shadowRoot));
-      });
-    } catch (e) {}
-    return out;
-  }
-
-  /** 이미 선택/동의된 상태인가. 토글 버튼을 다시 눌러 끄는 사고를 막기 위한 판정. */
-  function alreadyOn(el) {
-    var a = el.getAttribute('aria-pressed') || el.getAttribute('aria-checked')
-         || el.getAttribute('aria-selected');
-    if (a === 'true') return true;
-    if (a === 'false') return false;
-    var node = el;
-    for (var d = 0; d < 2 && node; d++) {          // 자신 + 부모까지만
-      var cl = node.classList;
-      if (cl) {
-        for (var i = 0; i < cl.length; i++) {
-          if (/^(active|selected|checked|on|agreed|is-active|is-selected|is-checked)$/i.test(cl[i])) {
-            return true;
-          }
-        }
-      }
-      node = node.parentElement;
-    }
-    var inp = el.querySelector && el.querySelector('input[type="checkbox"],input[type="radio"]');
-    return !!(inp && inp.checked);
-  }
-
-  function decide(el) {
-    var L = labelOf(el);
-    if (!L) return null;
-    for (var i = 0; i < CFG.never.length; i++) {
-      if (L.indexOf(norm(CFG.never[i])) !== -1) return null;
-    }
-    for (var t = 0; t < CFG.toggleLabels.length; t++) {
-      if (L === norm(CFG.toggleLabels[t]) && alreadyOn(el)) return null;   // 이미 켜짐 -> 건드리지 않음
-    }
-    for (var j = 0; j < CFG.click.length; j++) {
-      if (L === norm(CFG.click[j])) return L;
-    }
-    if (CFG.autoFinal) {
-      for (var k = 0; k < CFG.finalLabels.length; k++) {
-        if (L.indexOf(norm(CFG.finalLabels[k])) !== -1) return L;
-      }
-    }
-    return null;
-  }
-
-  function fire(el, label) {
-    var now = performance.now();
-    if (lastByLabel[label] && now - lastByLabel[label] < CFG.cooldownMs) return false;
-    if (clicks >= CFG.maxClicks) return false;
-    lastByLabel[label] = now;
-    seen.add(el);
-    clicks++;
-    if (U) {
-      U.fireClick(el);
-    } else {
-      try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
-      try {
-        el.click();
-      } catch (e) {
-        try {
-          el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        } catch (e2) { return false; }
-      }
-    }
-    var rec = { t: new Date().toISOString().slice(11, 23), label: label, n: clicks };
-    CFG.log.push(rec);
-    var report = window.__keReport || W.__keReport;   // Playwright 바인딩 (있을 때만)
-    if (report) { try { report(JSON.stringify(rec)); } catch (e) {} }
-    console.log('%c[KE_AUTO] click #' + clicks + ' -> ' + label, 'color:#0a0;font-weight:bold');
-    return true;
-  }
-
-  var SKIP_BOX = /동의하지|수신거부|선택안함|아니오|아니요/;
-
-  function doCheckboxes(root) {
-    if (!CFG.checkboxes) return;
-    var boxes;
-    try { boxes = root.querySelectorAll('input[type="checkbox"]:not(:checked)'); } catch (e) { return; }
-    boxes.forEach(function (cb) {
-      if (seen.has(cb) || !visible(cb)) return;
-      var scope = cb.closest('label, li, dd, div, tr') || cb.parentElement;
-      var txt = scope ? (scope.innerText || '') : '';
-      if (SKIP_BOX.test(txt)) return;      // 거부/미동의 항목은 건드리지 않음
-      seen.add(cb);
-      try { cb.click(); } catch (e) {}
-      console.log('%c[KE_AUTO] check -> ' + txt.replace(/\s+/g, ' ').slice(0, 30), 'color:#08a');
-    });
-  }
-
-  /* recorder.js 가 재생 중이면 그쪽이 이미 같은 확인/동의/스크롤 버튼을 정해진
-   * 순서로 누르고 있다. autoconfirm 이 동시에 끼어들면 recorder 보다 먼저 눌러
-   * 버려서 recorder 가 자기 단계의 요소를 못 찾고 20초씩 멈추는 경합이 생긴다.
-   * 재생 중엔 손을 떼고, 재생이 끝나면(완료/일시정지/결제대기) 다시 넘겨받는다. */
-  var REPLAY_GRACE_MS = 4000;   // 이보다 오래 같은 단계에서 막히면 예상 밖 모달로 보고 다시 끼어든다
-  function replaying() {
-    var R = W.KE_REC || window.KE_REC;
-    if (!R || !R.state || !R.state.playing) return false;
-    var stalled = (R.stalledMs && R.stalledMs()) || 0;
-    return stalled < REPLAY_GRACE_MS;
-  }
-
-  function sweep() {
-    if (!CFG.enabled || replaying()) return;
-    var roots = [document];
-    // same-origin iframe (약관/결제 위젯이 iframe 인 경우)
-    try {
-      document.querySelectorAll('iframe').forEach(function (f) {
-        try { if (f.contentDocument) roots.push(f.contentDocument); } catch (e) {}
-      });
-    } catch (e) {}
-
-    for (var r = 0; r < roots.length; r++) {
-      doCheckboxes(roots[r]);
-      var els = candidates(roots[r]);
-      for (var i = 0; i < els.length; i++) {
-        var el = els[i];
-        if (seen.has(el) || !visible(el)) continue;
-        var label = decide(el);
-        if (label) { fire(el, label); return; }   // 한 번에 하나만 -> 화면 전환 후 재평가
-      }
-    }
-  }
-
-  // document-start 주입 시점에는 document.documentElement 가 아직 null 이라
-  // 그것을 observe 하면 TypeError 로 스크립트 전체가 죽는다. document 는 항상 존재한다.
-  try {
-    new MutationObserver(sweep).observe(document, {
-      childList: true, subtree: true, attributes: true,
-      attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'disabled']
-    });
-  } catch (e) {
-    console.warn('[KE_AUTO] MutationObserver 설치 실패', e);
-  }
-
-  // 보조 1: transition 으로 늦게 나타나는 버튼 포착 (~16ms 반응)
-  (function raf() { sweep(); requestAnimationFrame(raf); })();
-  // 보조 2: 탭이 백그라운드면 rAF 가 멈춘다. 저빈도 인터벌로 최소한의 동작을 보장.
-  setInterval(sweep, 250);
-
-  // "이 페이지를 나가시겠습니까?" 억제 - 리트라이 중 흐름이 막히지 않도록
-  window.addEventListener('beforeunload', function (e) { delete e.returnValue; }, true);
-
-  CFG.on    = function () { CFG.enabled = true;  console.log('[KE_AUTO] ON'); };
-  CFG.off   = function () { CFG.enabled = false; console.log('[KE_AUTO] OFF'); };
-  CFG.dump  = function () { console.table(CFG.log); return CFG.log; };
-  CFG.reset = function () { clicks = 0; lastByLabel = Object.create(null); seen = new WeakSet(); };
-  CFG.scan  = function () {
-    var out = [];
-    candidates(document).forEach(function (el) {
-      if (visible(el)) {
-        out.push({
-          normalized: labelOf(el),
-          wouldClick: !!decide(el),
-          text: (el.innerText || el.value || '').replace(/\s+/g, ' ').trim().slice(0, 30)
-        });
-      }
-    });
-    console.table(out);
-    return out;
-  };
-
-  console.log('%c[KE_AUTO] armed. KE_AUTO.scan() 으로 후보 확인, KE_AUTO.off() 로 정지.',
-              'color:#c60;font-weight:bold');
-})();
-
-} catch (e) {
-  console.error('[KE] autoconfirm 로드 실패:', e);
-}
-
-
 // ---------- steps ----------
 try {
 (function () {
@@ -683,14 +396,20 @@ try {
     startedAt: 0,         // 발사 시각(ms). 단계별/총 소요시간 표시용
     skipped: 0,           // resync 로 건너뛴 단계 수. 완료 보고를 정직하게 하기 위함
     skippedList: [],      // 어떤 단계를 건너뛰었는지. 개수만 알려주면 판단을 못 한다
+    lastOpen: null,       // 사이트가 window.open 을 부른 결과 {at, ok}. 결제창이
+                          // 실제로 떴는지 확인하는 유일한 방법이다
     message: '',          // 패널 상태줄. 여기 선언이 없으면 load() 가 걸러내서
                           // 마지막 단계가 페이지를 이동시킨 경우 왜 멈췄는지가 사라진다
     expectDate: '',       // 목표 날짜(예: "08월 17일"). 넣으면 자동 감지한 최신 오픈일이
                           // 이것과 다를 때 클릭하지 않고 멈춘다 (엉뚱한 날 예매 방지)
     cabin: '일반석',       // 좌석 등급. 연습은 '일반석', 실전은 '프레스티지'
-    /* 결제하기까지 자동으로 눌러 결제창(네이버페이 등)을 띄운다.
-     * 결제창에서 다시 본인 인증이 필요하므로 여기서 바로 돈이 빠지지는 않는다.
-     * 패널의 [결제하기까지 자동] 체크박스로 끌 수 있다. */
+    /* 결제하기까지 자동으로 누른다. 결제창에서 다시 본인 인증이 필요하므로
+     * 여기서 바로 돈이 빠지지는 않는다. 패널 체크박스로 끌 수 있다.
+     *
+     * 주의: 실측에서 이 단계가 실행됐는데도 결제창이 뜨지 않은 적이 있다.
+     * 브라우저가 스크립트로 만든 클릭(isTrusted=false)에는 사용자 조작 권한을
+     * 주지 않아 새 창을 막는 경우가 있는데, 그러면 "눌렀다" 는 로그만 남는다.
+     * 그래서 재생이 끝나면 결제창이 실제로 떴는지 확인하라고 알린다. */
     allowPay: true,
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
     resyncAfterMs: 700,   // 이만큼 막히면 "이미 지나간 단계인가?" 하고 뒤를 넘겨본다.
@@ -698,8 +417,6 @@ try {
                           // 길게 잡으면 그만큼 그냥 버려진다
     lookahead: 3,         // 몇 단계 앞까지 넘겨볼지
     gapMs: 80,            // 클릭 사이 최소 간격
-    autoOff: false,       // 자동클릭을 꺼둔 상태인지. 새 문서마다 엔진이 기본값으로
-                          // 다시 켜지므로 저장해두지 않으면 이동 후 되살아난다
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
     bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
@@ -717,6 +434,23 @@ try {
     try { localStorage.setItem(LS, JSON.stringify(S)); } catch (e) {}
   }
   load();
+
+  /* 사이트는 결제창을 window.open 으로 띄운다. 스크립트가 만든 클릭에는 브라우저가
+   * 사용자 조작 권한을 주지 않아 팝업이 차단될 수 있는데, 그러면 "눌렀다" 는 기록만
+   * 남고 창은 안 뜬다. 열렸는지 알 방법이 없으므로 open 을 감싸서 결과를 남긴다. */
+  (function wrapOpen() {
+    try {
+      var orig = W.open;
+      if (typeof orig !== 'function' || orig.__keWrapped) return;
+      var wrapped = function () {
+        var w = orig.apply(this, arguments);
+        try { S.lastOpen = { at: Date.now(), ok: !!w }; save(); } catch (e) {}
+        return w;
+      };
+      wrapped.__keWrapped = true;
+      W.open = wrapped;
+    } catch (e) {}
+  })();
 
   /* 빌드 시 steps.json 에서 구워 넣은 기본 단계.
    *
@@ -759,13 +493,6 @@ try {
     S.playing = true;
     S.idx = 0;
     save();
-    // 새 문서에서도 자동클릭은 꺼둔 채로 시작한다 (suspendAuto 는 아래에 정의됨)
-    setTimeout(function () { suspendAuto('새로고침 후 재생'); }, 0);
-  }
-
-  // 재생 중이 아니어도, 사용자가 다시 켜기 전까지는 꺼진 상태를 유지한다
-  if (S.autoOff) {
-    setTimeout(reapplyAutoOff, 0);
   }
 
   var listeners = [];
@@ -830,43 +557,10 @@ try {
   }
   function secs(v) { return v.toFixed(2) + 's'; }
 
-  /* 재생 중에는 자동클릭 엔진을 멈춘다.
-   * 실측 로그에서 둘이 서로를 밟았다: 6단계(5.86s) 직후 KE_AUTO 가 확인/동의를 먼저
-   * 눌러 위험물 팝업을 띄웠고, 재생은 7단계 버튼이 팝업에 가려 hittable 하지 않아
-   * 10초를 그냥 기다렸다(7단계가 16.65s 에야 실행). 재생이 끝난 뒤에도 KE_AUTO 가
-   * 아래로스크롤/확인을 눌렀다 - 결제 버튼을 누른 직후에 뜬 팝업을 사람이 보기도
-   * 전에 치워버린 것이다.
-   * 녹화된 순서가 있으면 추측 클릭은 도움이 아니라 방해다. */
-  function suspendAuto(why) {
-    S.autoOff = true;
-    save();
-    var A = W.KE_AUTO || window.KE_AUTO;
-    if (A && A.enabled) {
-      A.enabled = false;
-      log('자동클릭 일시 정지 (' + why + ') - 재생이 순서를 알고 있으므로 추측 클릭은 방해가 된다');
-    }
-  }
-
-  /* 새 문서에서 엔진이 기본값(ON)으로 다시 뜨므로 저장된 상태를 매번 다시 적용한다.
-   *
-   * 다만 완전히 죽여두면 녹화에 없는 예상 못한 팝업이 떴을 때 아무도 못 치운다.
-   * 재생이 "막혀 있는 동안"(요소를 못 찾고 기다리는 중) 만 자동클릭을 열어준다.
-   * 그 순간엔 재생이 아무것도 누르지 않으므로 서로 밟을 일이 없고, 팝업이 치워지면
-   * 재생이 곧바로 이어진다. 재생이 끝난 뒤에는 다시 닫는다 - 결제 버튼을 누른
-   * 직후에 뜬 팝업을 사람이 보기도 전에 치워버리면 안 된다. */
-  function reapplyAutoOff() {
-    if (!S.autoOff) return;
-    var A = W.KE_AUTO || window.KE_AUTO;
-    if (!A) return;
-    var stalled = S.playing && waitingSince && (Date.now() - waitingSince) > S.resyncAfterMs;
-    A.enabled = !!stalled;
-  }
-
   function play() {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return; }
     S.recording = false;
     S.playing = true;
-    suspendAuto('재생 시작');
     if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.skipped = 0; S.skippedList = []; }
     waitingSince = 0;
     save();
@@ -889,7 +583,6 @@ try {
     S.playing = false;
     S.idx = 0;
     S.playAfterReload = true;
-    suspendAuto('발사');
     S.startedAt = Date.now();   // 소요시간은 "발사 시점" 부터 센다 (새로고침 포함)
     S.skipped = 0;
     S.skippedList = [];
@@ -949,7 +642,6 @@ try {
 
   function tick() {
     if (!S.playing) return;
-    reapplyAutoOff();   // 사이트가 SPA 로 문서를 갈아끼워도 꺼진 상태를 지킨다
     /* 문서가 아직 파싱 중이면 요소는 이미 DOM 에 있어도 그 페이지의 스크립트가
      * 클릭 핸들러를 아직 안 붙였을 수 있다. 그 틈에 누르면 예외도 없이 아무 일도
      * 안 일어난다. DOMContentLoaded 이후(interactive/complete)에만 진행한다. */
@@ -997,7 +689,21 @@ try {
 
     waitingSince = 0;
     lastClickAt = now;
+
+    /* 결제 단계는 눌렀다고 끝난 게 아니다. 팝업이 차단되면 로그만 남고 창은 안 뜬다.
+     * 누르기 직전의 open 기록을 잡아두고, 잠시 뒤 새 기록이 생겼는지로 판정한다. */
+    var payBefore = isPay(step) ? ((S.lastOpen && S.lastOpen.at) || 0) : null;
+
     U.fireClick(el);
+
+    if (payBefore !== null) {
+      setTimeout(function () {
+        var o = S.lastOpen;
+        if (o && o.ok && o.at > payBefore) log('결제창이 열렸습니다 - 결제창에서 마무리하세요');
+        else log('결제하기를 눌렀지만 결제창이 열리지 않았습니다. '
+                 + '팝업 차단일 수 있으니 결제 버튼을 직접 눌러주세요');
+      }, 1500);
+    }
 
     /* "아래로 스크롤" 은 버튼을 누르는 것만으로는 불안하다. 스크롤이 진행되면 버튼
      * 자체가 위로 밀리거나 화면 밖으로 나가서 클릭이 빗나가고, 팝업이 끝까지 안 내려가
@@ -1103,11 +809,6 @@ try {
     record: record, stop: stopRec, play: play, pause: pause,
     armForReload: armForReload,
     reset: reset, clear: clear, state: S, save: save,
-    resumeAuto: function () {
-      S.autoOff = false; save();
-      var A = W.KE_AUTO || window.KE_AUTO;
-      if (A) A.enabled = true;
-    },
     exportJson: exportJson, showExport: showExport, importJson: importJson,
     removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,
     stalledMs: stalledMs, elapsed: elapsed,
@@ -1315,7 +1016,7 @@ try {
  * 실제 발사 동작은 recorder.js 의 녹화 재생 하나뿐이다.
  * (예전엔 "조회 버튼 지정 + 좌석 헌팅" 경로도 있었지만, 녹화 재생이 그 일을
  *  전부 대신하므로 걷어냈다. 관련 컨트롤/상태도 같이 제거됨)
- * autoconfirm.js 가 먼저 로드되어 window.KE_AUTO 가 있어야 한다.
+ * 클릭은 전부 recorder.js 의 녹화 재생이 담당한다 (라벨 추측 클릭은 제거됨).
  * ============================================================ */
 (function () {
   'use strict';
@@ -1578,12 +1279,6 @@ try {
   function render() {
     if (!root) return;
     renderRec();
-    var A = W.KE_AUTO || window.KE_AUTO;
-    var ab = root.querySelector('#ke-auto');
-    if (ab && A) {
-      ab.textContent = A.enabled ? '자동클릭 ON' : '자동클릭 OFF';
-      ab.style.background = A.enabled ? '#2a7' : '#888';
-    }
     root.querySelector('#ke-target').value = S.targetKst;
     root.querySelector('#ke-lead').value = S.leadMs;
     var R2 = REC();
@@ -1620,9 +1315,7 @@ try {
       '<div id="ke-clock">--</div><div id="ke-cd">--</div>' +
       '<label>오픈시각 (KST)</label><input id="ke-target" placeholder="2026-08-22 10:00:00">' +
       '<label>선발사(ms)</label><input id="ke-lead" type="number">' +
-      '<div class="row">' +
-      '<button id="ke-sync" style="background:#666">시각 동기</button>' +
-      '<button id="ke-auto" style="background:#2a7">자동클릭 ON</button></div>' +
+      '<button id="ke-sync" style="background:#666;width:100%">시각 동기</button>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
       '<label>좌석 등급</label>' +
       '<select id="ke-cabin" style="width:100%;box-sizing:border-box;padding:3px 5px;' +
@@ -1714,18 +1407,6 @@ try {
       R.onChange(renderRec);
       renderRec();
     }
-    root.querySelector('#ke-auto').onclick = function () {
-      var A = W.KE_AUTO || window.KE_AUTO;
-      if (!A) { toast('자동클릭 엔진이 없습니다', true); return; }
-      var R3 = REC();
-      // 재생이 꺼둔 상태는 저장돼 있어서, 여기서 켤 때 그것도 같이 풀어줘야
-      // 다음 페이지에서 다시 꺼지지 않는다
-      if (A.enabled) { A.off(); if (R3) { R3.state.autoOff = true; R3.save(); } }
-      else { R3 && R3.resumeAuto ? R3.resumeAuto() : A.on(); }
-      render();
-      toast('자동클릭 ' + (A.enabled ? 'ON - 확인/동의 모달을 자동 통과합니다'
-                                    : 'OFF - 아무것도 누르지 않습니다'));
-    };
     root.querySelector('#ke-target').onchange = function (e) { S.targetKst = e.target.value; save(); };
     root.querySelector('#ke-lead').onchange = function (e) { S.leadMs = +e.target.value || 0; save(); };
     root.querySelector('#ke-arm').onclick = function () {

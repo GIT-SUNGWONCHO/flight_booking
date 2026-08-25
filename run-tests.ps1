@@ -52,9 +52,9 @@ Invoke-Stage "[8/9] 단계 우선순위 테스트" {
 } "우선순위 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[9/9] 자동클릭 정지 / 건너뜀 보고 테스트" {
-  & ./.venv/Scripts/python.exe test/test_autosuspend.py
-} "자동클릭 정지 테스트 실패"
+Invoke-Stage "[9/9] 건너뜀 보고 / 추측클릭 제거 확인" {
+  & ./.venv/Scripts/python.exe test/test_skipreport.py
+} "건너뜀 보고 테스트 실패"
 
 Reset-Browsers
 Write-Host "`n전체 통과" -ForegroundColor Green

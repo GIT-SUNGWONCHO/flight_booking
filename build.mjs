@@ -1,4 +1,9 @@
-/* autoconfirm.js + hud.js  ->  userscript/ke-award-macro.user.js
+/* util + steps + recorder + editor + hud  ->  userscript/ke-award-macro.user.js
+ *
+ * autoconfirm.js(라벨 추측 클릭)는 유저스크립트에서 뺐다. 녹화 재생이 순서를
+ * 정확히 알고 있는데 옆에서 추측으로 누르면 방해만 된다 - 실측에서 팝업을 먼저
+ * 띄워 재생을 10초 멈춰세웠고, 재생이 끝난 뒤 결제 직후 팝업까지 눌러버렸다.
+ * Playwright 러너(runner.py)는 녹화가 없는 경로라 계속 쓴다.
  * 엔진을 한 곳에서만 관리하기 위한 스티처.  실행:  node build.mjs
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -63,7 +68,6 @@ const baked = bakedSteps();
 const out = [
   HEADER,
   isolate('util', readFileSync('ke_award/util.js', 'utf8')),
-  isolate('autoconfirm', readFileSync('ke_award/autoconfirm.js', 'utf8')),
   isolate('steps', baked.js),
   isolate('recorder', readFileSync('ke_award/recorder.js', 'utf8')),
   isolate('editor', readFileSync('ke_award/editor.js', 'utf8')),

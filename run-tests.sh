@@ -55,8 +55,8 @@ stage "[8/9] 단계 우선순위 테스트"
 "$PY" test/test_precedence.py
 
 reset_browsers
-stage "[9/9] 자동클릭 정지 / 건너뜀 보고 테스트"
-"$PY" test/test_autosuspend.py
+stage "[9/9] 건너뜀 보고 / 추측클릭 제거 확인"
+"$PY" test/test_skipreport.py
 
 reset_browsers
 printf '\n\033[32m전체 통과\033[0m\n'

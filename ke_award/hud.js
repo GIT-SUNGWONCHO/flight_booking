@@ -8,7 +8,7 @@
  * 실제 발사 동작은 recorder.js 의 녹화 재생 하나뿐이다.
  * (예전엔 "조회 버튼 지정 + 좌석 헌팅" 경로도 있었지만, 녹화 재생이 그 일을
  *  전부 대신하므로 걷어냈다. 관련 컨트롤/상태도 같이 제거됨)
- * autoconfirm.js 가 먼저 로드되어 window.KE_AUTO 가 있어야 한다.
+ * 클릭은 전부 recorder.js 의 녹화 재생이 담당한다 (라벨 추측 클릭은 제거됨).
  * ============================================================ */
 (function () {
   'use strict';
@@ -271,12 +271,6 @@
   function render() {
     if (!root) return;
     renderRec();
-    var A = W.KE_AUTO || window.KE_AUTO;
-    var ab = root.querySelector('#ke-auto');
-    if (ab && A) {
-      ab.textContent = A.enabled ? '자동클릭 ON' : '자동클릭 OFF';
-      ab.style.background = A.enabled ? '#2a7' : '#888';
-    }
     root.querySelector('#ke-target').value = S.targetKst;
     root.querySelector('#ke-lead').value = S.leadMs;
     var R2 = REC();
@@ -313,9 +307,7 @@
       '<div id="ke-clock">--</div><div id="ke-cd">--</div>' +
       '<label>오픈시각 (KST)</label><input id="ke-target" placeholder="2026-08-22 10:00:00">' +
       '<label>선발사(ms)</label><input id="ke-lead" type="number">' +
-      '<div class="row">' +
-      '<button id="ke-sync" style="background:#666">시각 동기</button>' +
-      '<button id="ke-auto" style="background:#2a7">자동클릭 ON</button></div>' +
+      '<button id="ke-sync" style="background:#666;width:100%">시각 동기</button>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
       '<label>좌석 등급</label>' +
       '<select id="ke-cabin" style="width:100%;box-sizing:border-box;padding:3px 5px;' +
@@ -407,18 +399,6 @@
       R.onChange(renderRec);
       renderRec();
     }
-    root.querySelector('#ke-auto').onclick = function () {
-      var A = W.KE_AUTO || window.KE_AUTO;
-      if (!A) { toast('자동클릭 엔진이 없습니다', true); return; }
-      var R3 = REC();
-      // 재생이 꺼둔 상태는 저장돼 있어서, 여기서 켤 때 그것도 같이 풀어줘야
-      // 다음 페이지에서 다시 꺼지지 않는다
-      if (A.enabled) { A.off(); if (R3) { R3.state.autoOff = true; R3.save(); } }
-      else { R3 && R3.resumeAuto ? R3.resumeAuto() : A.on(); }
-      render();
-      toast('자동클릭 ' + (A.enabled ? 'ON - 확인/동의 모달을 자동 통과합니다'
-                                    : 'OFF - 아무것도 누르지 않습니다'));
-    };
     root.querySelector('#ke-target').onchange = function (e) { S.targetKst = e.target.value; save(); };
     root.querySelector('#ke-lead').onchange = function (e) { S.leadMs = +e.target.value || 0; save(); };
     root.querySelector('#ke-arm').onclick = function () {

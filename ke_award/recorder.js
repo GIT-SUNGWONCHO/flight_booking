@@ -42,14 +42,20 @@
     startedAt: 0,         // 발사 시각(ms). 단계별/총 소요시간 표시용
     skipped: 0,           // resync 로 건너뛴 단계 수. 완료 보고를 정직하게 하기 위함
     skippedList: [],      // 어떤 단계를 건너뛰었는지. 개수만 알려주면 판단을 못 한다
+    lastOpen: null,       // 사이트가 window.open 을 부른 결과 {at, ok}. 결제창이
+                          // 실제로 떴는지 확인하는 유일한 방법이다
     message: '',          // 패널 상태줄. 여기 선언이 없으면 load() 가 걸러내서
                           // 마지막 단계가 페이지를 이동시킨 경우 왜 멈췄는지가 사라진다
     expectDate: '',       // 목표 날짜(예: "08월 17일"). 넣으면 자동 감지한 최신 오픈일이
                           // 이것과 다를 때 클릭하지 않고 멈춘다 (엉뚱한 날 예매 방지)
     cabin: '일반석',       // 좌석 등급. 연습은 '일반석', 실전은 '프레스티지'
-    /* 결제하기까지 자동으로 눌러 결제창(네이버페이 등)을 띄운다.
-     * 결제창에서 다시 본인 인증이 필요하므로 여기서 바로 돈이 빠지지는 않는다.
-     * 패널의 [결제하기까지 자동] 체크박스로 끌 수 있다. */
+    /* 결제하기까지 자동으로 누른다. 결제창에서 다시 본인 인증이 필요하므로
+     * 여기서 바로 돈이 빠지지는 않는다. 패널 체크박스로 끌 수 있다.
+     *
+     * 주의: 실측에서 이 단계가 실행됐는데도 결제창이 뜨지 않은 적이 있다.
+     * 브라우저가 스크립트로 만든 클릭(isTrusted=false)에는 사용자 조작 권한을
+     * 주지 않아 새 창을 막는 경우가 있는데, 그러면 "눌렀다" 는 로그만 남는다.
+     * 그래서 재생이 끝나면 결제창이 실제로 떴는지 확인하라고 알린다. */
     allowPay: true,
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
     resyncAfterMs: 700,   // 이만큼 막히면 "이미 지나간 단계인가?" 하고 뒤를 넘겨본다.
@@ -57,8 +63,6 @@
                           // 길게 잡으면 그만큼 그냥 버려진다
     lookahead: 3,         // 몇 단계 앞까지 넘겨볼지
     gapMs: 80,            // 클릭 사이 최소 간격
-    autoOff: false,       // 자동클릭을 꺼둔 상태인지. 새 문서마다 엔진이 기본값으로
-                          // 다시 켜지므로 저장해두지 않으면 이동 후 되살아난다
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
     bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
@@ -76,6 +80,23 @@
     try { localStorage.setItem(LS, JSON.stringify(S)); } catch (e) {}
   }
   load();
+
+  /* 사이트는 결제창을 window.open 으로 띄운다. 스크립트가 만든 클릭에는 브라우저가
+   * 사용자 조작 권한을 주지 않아 팝업이 차단될 수 있는데, 그러면 "눌렀다" 는 기록만
+   * 남고 창은 안 뜬다. 열렸는지 알 방법이 없으므로 open 을 감싸서 결과를 남긴다. */
+  (function wrapOpen() {
+    try {
+      var orig = W.open;
+      if (typeof orig !== 'function' || orig.__keWrapped) return;
+      var wrapped = function () {
+        var w = orig.apply(this, arguments);
+        try { S.lastOpen = { at: Date.now(), ok: !!w }; save(); } catch (e) {}
+        return w;
+      };
+      wrapped.__keWrapped = true;
+      W.open = wrapped;
+    } catch (e) {}
+  })();
 
   /* 빌드 시 steps.json 에서 구워 넣은 기본 단계.
    *
@@ -118,13 +139,6 @@
     S.playing = true;
     S.idx = 0;
     save();
-    // 새 문서에서도 자동클릭은 꺼둔 채로 시작한다 (suspendAuto 는 아래에 정의됨)
-    setTimeout(function () { suspendAuto('새로고침 후 재생'); }, 0);
-  }
-
-  // 재생 중이 아니어도, 사용자가 다시 켜기 전까지는 꺼진 상태를 유지한다
-  if (S.autoOff) {
-    setTimeout(reapplyAutoOff, 0);
   }
 
   var listeners = [];
@@ -189,43 +203,10 @@
   }
   function secs(v) { return v.toFixed(2) + 's'; }
 
-  /* 재생 중에는 자동클릭 엔진을 멈춘다.
-   * 실측 로그에서 둘이 서로를 밟았다: 6단계(5.86s) 직후 KE_AUTO 가 확인/동의를 먼저
-   * 눌러 위험물 팝업을 띄웠고, 재생은 7단계 버튼이 팝업에 가려 hittable 하지 않아
-   * 10초를 그냥 기다렸다(7단계가 16.65s 에야 실행). 재생이 끝난 뒤에도 KE_AUTO 가
-   * 아래로스크롤/확인을 눌렀다 - 결제 버튼을 누른 직후에 뜬 팝업을 사람이 보기도
-   * 전에 치워버린 것이다.
-   * 녹화된 순서가 있으면 추측 클릭은 도움이 아니라 방해다. */
-  function suspendAuto(why) {
-    S.autoOff = true;
-    save();
-    var A = W.KE_AUTO || window.KE_AUTO;
-    if (A && A.enabled) {
-      A.enabled = false;
-      log('자동클릭 일시 정지 (' + why + ') - 재생이 순서를 알고 있으므로 추측 클릭은 방해가 된다');
-    }
-  }
-
-  /* 새 문서에서 엔진이 기본값(ON)으로 다시 뜨므로 저장된 상태를 매번 다시 적용한다.
-   *
-   * 다만 완전히 죽여두면 녹화에 없는 예상 못한 팝업이 떴을 때 아무도 못 치운다.
-   * 재생이 "막혀 있는 동안"(요소를 못 찾고 기다리는 중) 만 자동클릭을 열어준다.
-   * 그 순간엔 재생이 아무것도 누르지 않으므로 서로 밟을 일이 없고, 팝업이 치워지면
-   * 재생이 곧바로 이어진다. 재생이 끝난 뒤에는 다시 닫는다 - 결제 버튼을 누른
-   * 직후에 뜬 팝업을 사람이 보기도 전에 치워버리면 안 된다. */
-  function reapplyAutoOff() {
-    if (!S.autoOff) return;
-    var A = W.KE_AUTO || window.KE_AUTO;
-    if (!A) return;
-    var stalled = S.playing && waitingSince && (Date.now() - waitingSince) > S.resyncAfterMs;
-    A.enabled = !!stalled;
-  }
-
   function play() {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return; }
     S.recording = false;
     S.playing = true;
-    suspendAuto('재생 시작');
     if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.skipped = 0; S.skippedList = []; }
     waitingSince = 0;
     save();
@@ -248,7 +229,6 @@
     S.playing = false;
     S.idx = 0;
     S.playAfterReload = true;
-    suspendAuto('발사');
     S.startedAt = Date.now();   // 소요시간은 "발사 시점" 부터 센다 (새로고침 포함)
     S.skipped = 0;
     S.skippedList = [];
@@ -308,7 +288,6 @@
 
   function tick() {
     if (!S.playing) return;
-    reapplyAutoOff();   // 사이트가 SPA 로 문서를 갈아끼워도 꺼진 상태를 지킨다
     /* 문서가 아직 파싱 중이면 요소는 이미 DOM 에 있어도 그 페이지의 스크립트가
      * 클릭 핸들러를 아직 안 붙였을 수 있다. 그 틈에 누르면 예외도 없이 아무 일도
      * 안 일어난다. DOMContentLoaded 이후(interactive/complete)에만 진행한다. */
@@ -356,7 +335,21 @@
 
     waitingSince = 0;
     lastClickAt = now;
+
+    /* 결제 단계는 눌렀다고 끝난 게 아니다. 팝업이 차단되면 로그만 남고 창은 안 뜬다.
+     * 누르기 직전의 open 기록을 잡아두고, 잠시 뒤 새 기록이 생겼는지로 판정한다. */
+    var payBefore = isPay(step) ? ((S.lastOpen && S.lastOpen.at) || 0) : null;
+
     U.fireClick(el);
+
+    if (payBefore !== null) {
+      setTimeout(function () {
+        var o = S.lastOpen;
+        if (o && o.ok && o.at > payBefore) log('결제창이 열렸습니다 - 결제창에서 마무리하세요');
+        else log('결제하기를 눌렀지만 결제창이 열리지 않았습니다. '
+                 + '팝업 차단일 수 있으니 결제 버튼을 직접 눌러주세요');
+      }, 1500);
+    }
 
     /* "아래로 스크롤" 은 버튼을 누르는 것만으로는 불안하다. 스크롤이 진행되면 버튼
      * 자체가 위로 밀리거나 화면 밖으로 나가서 클릭이 빗나가고, 팝업이 끝까지 안 내려가
@@ -462,11 +455,6 @@
     record: record, stop: stopRec, play: play, pause: pause,
     armForReload: armForReload,
     reset: reset, clear: clear, state: S, save: save,
-    resumeAuto: function () {
-      S.autoOff = false; save();
-      var A = W.KE_AUTO || window.KE_AUTO;
-      if (A) A.enabled = true;
-    },
     exportJson: exportJson, showExport: showExport, importJson: importJson,
     removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,
     stalledMs: stalledMs, elapsed: elapsed,

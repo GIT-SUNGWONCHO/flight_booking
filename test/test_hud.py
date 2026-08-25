@@ -47,12 +47,11 @@ def main() -> int:
             pg.goto(FIXTURE)
             pg.wait_for_timeout(600)
 
-            check(pg.evaluate("typeof window.KE_AUTO") == "object", "autoconfirm 로드")
             check(pg.evaluate("typeof window.KE_HUD") == "object", "HUD 로드")
             check(pg.evaluate("!!document.getElementById('ke-hud')"), "패널 렌더")
 
             # 남아 있어야 하는 컨트롤
-            for el, name in (("ke-auto", "자동클릭 토글"), ("ke-sync", "시각 동기"),
+            for el, name in (("ke-sync", "시각 동기"),
                              ("ke-rec", "녹화"), ("ke-play", "재생"), ("ke-edit", "단계 편집"),
                              ("ke-export", "내보내기"), ("ke-rehearse", "연습 발사"),
                              ("ke-arm", "대기 시작")):
@@ -64,12 +63,6 @@ def main() -> int:
                              ("ke-mode", "동작 전환"), ("ke-retry", "재조회 입력")):
                 check(not pg.evaluate(f"!!document.getElementById('{el}')"), f"{name} 제거됨")
 
-            # 자동클릭 토글이 실제로 엔진을 끄고 켜는지
-            pg.click("#ke-auto")
-            check(pg.evaluate("window.KE_AUTO.enabled") is False, "토글로 자동클릭 OFF")
-            check(pg.inner_text("#ke-auto").strip() == "자동클릭 OFF", "버튼 라벨이 OFF 로 바뀜")
-            pg.click("#ke-auto")
-            check(pg.evaluate("window.KE_AUTO.enabled") is True, "토글로 다시 ON")
 
             # 단계가 하나도 없으면 발사하지 않고 안내만 한다.
             # clear() 는 이제 내장본을 복원하므로(그게 의도) 빈 상태는 직접 만든다.
@@ -128,12 +121,10 @@ def main() -> int:
             st = pg.evaluate("() => ({idx: KE_REC.state.idx, total: KE_REC.state.steps.length,"
                              " skipped: KE_REC.state.skipped,"
                              " aborted: window.__aborted || null,"
-                             " auto: window.KE_AUTO.enabled,"
                              " armed: window.KE_HUD.state.armed})")
             check(st["idx"] == st["total"], f"녹화 단계를 끝까지 재생 ({st['idx']}/{st['total']})")
             check(not st["skipped"], f"건너뛴 단계 없음 (실제 {st['skipped']})")
             check(st["aborted"] is None, "오클릭 없음", f"눌림: {st['aborted']}")
-            check(st["auto"] is False, "재생이 끝나도 자동클릭은 꺼진 채로 둔다")
             check(st["armed"] is False, "재생으로 넘어가며 HUD 무장은 해제됨")
 
             pg.wait_for_timeout(300)
