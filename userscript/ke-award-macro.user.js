@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.3.0
+// @version      1.12.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -337,6 +337,20 @@ try {
 
 } catch (e) {
   console.error('[KE] util 로드 실패:', e);
+}
+
+
+// ---------- build ----------
+try {
+(function () {
+  var W = window;
+  try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
+  var B = { version: '1.12.0', hash: '32a2bb6' };
+  try { W.KE_BUILD = B; } catch (e) {}
+  if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
+})();
+} catch (e) {
+  console.error('[KE] build 로드 실패:', e);
 }
 
 
@@ -1428,7 +1442,8 @@ try {
       '#ke-toast{font-size:11px;min-height:15px}' +
       '#ke-hud .row{display:flex;gap:5px}#ke-hud .row>*{flex:1}' +
       '</style>' +
-      '<h4>KE 마일리지 예매 보조 <span style="float:right;cursor:pointer" id="ke-min">_</span></h4>' +
+      '<h4>KE 마일리지 예매 보조 <span id="ke-ver"></span>' +
+      '<span style="float:right;cursor:pointer" id="ke-min">_</span></h4>' +
       '<div id="ke-body">' +
       '<div id="ke-clock">--</div><div id="ke-cd">--</div>' +
       '<label>오픈시각 (KST)</label><input id="ke-target" placeholder="2026-08-22 10:00:00">' +
@@ -1462,6 +1477,16 @@ try {
       '<button id="ke-arm" style="background:#2a7;width:100%">▶ 대기 시작</button>' +
       '<div id="ke-status"></div><div id="ke-toast"></div>' +
       '</div>';
+    var B = W.KE_BUILD || window.KE_BUILD;
+    var ver = root.querySelector('#ke-ver');
+    /* 어떤 빌드가 로드됐는지 한눈에 보이게 한다. 버전을 안 올려서 이전 스크립트로
+     * 계속 테스트한 적이 있다 - 그때 이게 있었으면 바로 알았다. */
+    if (ver && B) {
+      ver.textContent = 'v' + B.version;
+      ver.style.cssText = 'font-size:10px;font-weight:400;color:'
+        + (/dirty|nogit/.test(B.version) ? '#c60' : '#888');
+      ver.title = 'build ' + B.hash;
+    }
     document.documentElement.appendChild(root);
 
     statusEl = root.querySelector('#ke-status');

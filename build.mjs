@@ -7,6 +7,23 @@
  * 엔진을 한 곳에서만 관리하기 위한 스티처.  실행:  node build.mjs
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+
+/* 버전은 손으로 올리면 반드시 까먹는다. 그러면 붙여넣은 스크립트가 최신인지
+ * 확인할 방법이 없어진다(실제로 이전 빌드로 계속 테스트한 적이 있다).
+ * 커밋 수를 마이너로, 짧은 해시를 빌드 표시로 써서 빌드할 때마다 자동으로 정한다. */
+function gitInfo() {
+  const run = (c) => execSync(c, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  try {
+    const count = run('git rev-list --count HEAD');
+    const hash = run('git rev-parse --short HEAD');
+    const dirty = run('git status --porcelain') ? '-dirty' : '';
+    return { version: `1.${count}.0${dirty}`, hash: hash + dirty };
+  } catch (e) {
+    return { version: '1.0.0-nogit', hash: 'nogit' };
+  }
+}
+const GIT = gitInfo();
 
 /* @grant 를 none 으로 두면 Tampermonkey 가 페이지 컨텍스트에 <script> 로 밀어넣는데,
  * CSP 가 강한 사이트(항공사 등)에서는 그게 차단되어 스크립트가 조용히 죽는다.
@@ -15,7 +32,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 const HEADER = `// ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.3.0
+// @version      ${GIT.version}
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -68,6 +85,13 @@ const baked = bakedSteps();
 const out = [
   HEADER,
   isolate('util', readFileSync('ke_award/util.js', 'utf8')),
+  isolate('build', `(function () {
+  var W = window;
+  try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
+  var B = { version: '${GIT.version}', hash: '${GIT.hash}' };
+  try { W.KE_BUILD = B; } catch (e) {}
+  if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
+})();`),
   isolate('steps', baked.js),
   isolate('recorder', readFileSync('ke_award/recorder.js', 'utf8')),
   isolate('editor', readFileSync('ke_award/editor.js', 'utf8')),

@@ -76,6 +76,17 @@ def main() -> int:
     check("KE_AUTO" not in src, "유저스크립트에 추측 클릭 엔진이 없음")
     check("KE_REC" in src and "KE_HUD" in src, "녹화 재생과 패널은 그대로 있음")
 
+    # 버전이 커밋마다 자동으로 올라가는지 (손으로 올리면 반드시 까먹는다).
+    # 붙여넣은 스크립트가 최신인지 확인할 유일한 수단이라 회귀로 고정한다.
+    import re
+    hdr = re.search(r"@version\s+(\S+)", src)
+    check(bool(hdr), "헤더에 @version 이 있음")
+    if hdr:
+        v = hdr.group(1)
+        check(v != "1.3.0" and re.match(r"^1\.\d+\.\d+", v) is not None,
+              f"버전이 git 에서 자동 생성됨 ({v})")
+        check(f"version: '{v}'" in src, "스크립트 안의 KE_BUILD 와 헤더 버전이 일치")
+
     print()
     print("FAILED: " + ", ".join(fails) if fails else "건너뜀 보고 테스트 통과")
     return 1 if fails else 0
