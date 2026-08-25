@@ -35,7 +35,38 @@
     var top;
     try { top = document.elementFromPoint(x, y); } catch (e) { return !strict; }
     if (!top) return !strict;
+    /* 우리 패널이 위를 덮고 있는 건 막힌 게 아니다. fireClick 은 좌표로 누르는 게
+     * 아니라 요소에 이벤트를 직접 쏘므로 z-order 와 무관하게 닿는다. 이걸 빼지 않으면
+     * 패널이 가린 버튼(화면 하단의 결제하기 등)을 "모달에 막혔다" 고 오판한다. */
+    try { if (top.closest && top.closest('#ke-hud, #ke-editor, #ke-export')) return true; } catch (e) {}
     return top === el || el.contains(top) || top.contains(el);
+  }
+
+  /* 이미 켜져(동의되어) 있는가.
+   * 동의 버튼은 토글이라 이미 켜진 걸 다시 누르면 꺼진다. 녹화에 같은 동의가 두 번
+   * 들어가 있으면 두 번째 클릭이 동의를 풀어버리고, 그 뒤 모달이 안 떠서 흐름이 통째로
+   * 막힌다(실측). 판정이 안 되면 false 를 돌려 예전처럼 그냥 누른다 - 없던 기능이라
+   * 오판으로 안 누르는 것보다 낫다. */
+  function alreadyOn(el) {
+    if (!el) return false;
+    var a = el.getAttribute('aria-pressed') || el.getAttribute('aria-checked')
+         || el.getAttribute('aria-selected');
+    if (a === 'true') return true;
+    if (a === 'false') return false;
+    var n = el;
+    for (var d = 0; d < 2 && n; d++) {
+      var cl = n.classList;
+      if (cl) {
+        for (var i = 0; i < cl.length; i++) {
+          if (/^(active|selected|checked|on|agreed|is-active|is-selected|is-checked)$/i.test(cl[i])) {
+            return true;
+          }
+        }
+      }
+      n = n.parentElement;
+    }
+    var inp = el.querySelector && el.querySelector('input[type="checkbox"],input[type="radio"]');
+    return !!(inp && inp.checked);
   }
 
   function label(el) {
@@ -311,7 +342,8 @@
     visible: visible, label: label, cssPath: cssPath, findEl: findEl, CLICKABLE: CLICKABLE,
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
     findLatestOpenDate: findLatestOpenDate, inChrome: inChrome, realTarget: realTarget,
-    findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable
+    findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
+    alreadyOn: alreadyOn
   };
   try { W.KE_UTIL = U; } catch (e) {}
   if (W !== window) { try { window.KE_UTIL = U; } catch (e) {} }

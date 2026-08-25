@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8"><title>중복 동의 시뮬레이터</title>
+<style>body{font:14px sans-serif;padding:20px}
+ button{padding:8px 14px;margin:4px;border:1px solid #333;background:#fff}
+ button[aria-pressed="true"]{background:#222;color:#fff}
+ #m{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center}
+ #m.on{display:flex} .box{background:#fff;padding:20px;border-radius:8px}
+ #pay{position:fixed;bottom:20px;right:20px}
+ .spacer{height:1200px}</style>
+<body>
+<!-- 실측: 녹화에 같은 동의(#a1)가 두 번 들어 있어서 두 번째 클릭이 동의를 꺼버렸고,
+     그 뒤 모달이 안 떠서 흐름이 통째로 막혔다.
+     결제 버튼은 화면 밖(아래)에 둬서, 건너뛰기 판정이 스크롤 후에 이뤄지는지도 본다. -->
+<button id="a1" aria-pressed="false">동의</button>
+<button id="a3" aria-pressed="true">동의</button>
+<div id="m"><div class="box"><h3>운송약관</h3><button id="ok">확인</button></div></div>
+<div class="spacer"></div>
+<button id="pay">결제하기</button>
+<script>
+window.__a1Clicks = 0; window.__payClicks = 0;
+document.getElementById('a1').onclick = function () {
+  window.__a1Clicks++;
+  var on = this.getAttribute('aria-pressed') === 'true';
+  if (on) { this.setAttribute('aria-pressed', 'false'); window.__turnedOff = true; return; }
+  document.getElementById('m').className = 'on';    // 모달을 띄우고
+};
+document.getElementById('ok').onclick = function () {
+  document.getElementById('m').className = '';
+  document.getElementById('a1').setAttribute('aria-pressed', 'true');  // 확인해야 동의됨
+};
+document.getElementById('a3').onclick = function () {
+  var on = this.getAttribute('aria-pressed') === 'true';
+  this.setAttribute('aria-pressed', on ? 'false' : 'true');
+  if (on) window.__a3TurnedOff = true;
+};
+document.getElementById('pay').onclick = function(){ window.__payClicks++; };
+</script>
+</body>

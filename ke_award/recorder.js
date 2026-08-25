@@ -325,7 +325,10 @@
       var nx = S.steps[k];
       if (isPay(nx)) return false;
       var nel = locate(nx);
-      if (nel && U.hittable(nel, true)) {   // strict: 화면 밖이면 건너뛰지 않는다
+      /* 화면 밖이면 strict 판정이 무조건 실패해서, 정작 건너뛰어야 할 때도 못 건너뛴다.
+       * 스크롤로 화면에 넣어보고 나서 판정한다 (스크롤은 아무것도 누르지 않는다). */
+      if (nel) { try { nel.scrollIntoView({ block: 'center' }); } catch (e) {} }
+      if (nel && U.hittable(nel, true)) {   // strict: 확실할 때만 건너뛴다
         log('단계 ' + (S.idx + 1) + ' 건너뜀 (이미 지나간 것으로 보임) -> ' + (k + 1) + '단계로');
         S.skipped = (S.skipped || 0) + (k - S.idx);
         if (!S.skippedList) S.skippedList = [];
@@ -379,6 +382,17 @@
      *  - 대한항공: #btnScrollDown 이 숨고 #btnConfirm 이 나타난다 (요소가 사라짐)
      *  - 같은 버튼의 라벨만 '확인' 으로 바뀌는 형태도 있다
      * 둘 다 "더 이상 스크롤 버튼이 아니다" 로 판정한다. */
+    /* 이미 동의된 항목을 다시 누르면 꺼진다. 녹화에 같은 동의가 두 번 들어 있어서
+     * 실제로 그렇게 꺼졌고, 이후 모달이 안 떠 흐름이 통째로 막혔다. 켜져 있으면 넘어간다. */
+    if (el && TOGGLEY.test(step.text || '') && U.alreadyOn(el)) {
+      S.idx++;
+      retries = 0;
+      save();
+      log('재생 ' + S.idx + '/' + S.steps.length + ': 이미 켜져 있어 누르지 않음 - '
+          + String(step.text || step.sel).slice(0, 20) + '  [' + secs(elapsed()) + ']');
+      return;
+    }
+
     var scrollDone = SCROLLY.test(step.text || '') && scrollClicks > 0
                      && (!el || !SCROLLY.test(U.label(el)));
     if (scrollDone) {
