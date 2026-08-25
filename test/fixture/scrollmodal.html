@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8"><title>스크롤 팝업 시뮬레이터</title>
+<style>body{font:14px sans-serif;padding:20px}
+ button{padding:8px 14px;margin:4px}
+ #m{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center}
+ #m.on{display:flex}
+ .box{background:#fff;padding:20px;border-radius:8px;width:420px}
+ .body{height:150px;overflow-y:auto;border:1px solid #ddd}
+ .filler{height:900px}</style>
+<body>
+<!-- 실측: 아래로 스크롤을 녹화된 2번만 누르면 팝업이 끝까지 안 내려가고,
+     화면 밖에 있던 [확인] 을 "누를 수 있다" 고 오판해 스크롤 단계를 건너뛰었다.
+     여기서는 3번 눌러야 [확인] 이 나오게 해서 그 상황을 만든다. -->
+<button id="agree">동의</button>
+<button id="pay">결제하기</button>
+<div id="m"><div class="box"><h3>운임 규정 상세 보기</h3>
+  <div class="body" id="body"><div class="filler"></div></div>
+  <button id="btnScrollDown">아래로 스크롤</button>
+  <button id="btnConfirm" style="display:none">확인</button>
+</div></div>
+<script>
+var need = 3, n = 0;
+window.__scrollClicks = 0; window.__payClicks = 0; window.__confirmed = false;
+document.getElementById('agree').onclick = function(){ document.getElementById('m').className = 'on'; };
+document.getElementById('pay').onclick = function(){ window.__payClicks++; };
+document.getElementById('btnScrollDown').onclick = function(){
+  n++; window.__scrollClicks = n;
+  if (n >= need) {           // 끝까지 내려가면 버튼이 확인으로 바뀐다
+    this.style.display = 'none';
+    document.getElementById('btnConfirm').style.display = '';
+  }
+};
+document.getElementById('btnConfirm').onclick = function(){
+  window.__confirmed = true;
+  document.getElementById('m').className = '';
+};
+</script>
+</body>

@@ -38,16 +38,21 @@ try {
    * 모달이 떠 있으면 그 뒤의 버튼도 getBoundingClientRect/opacity 상으로는 멀쩡히
    * 보이지만, 실제로 클릭하면 모달이 먹는다. 그 좌표에서 실제로 잡히는 요소가
    * 자기 자신(또는 조상/자손)인지로 판정한다.
-   * 화면 밖이라 판정이 불가능하면 통과시킨다 - fireClick 이 스크롤해서 누른다. */
-  function hittable(el) {
+   * 화면 밖이라 판정이 불가능하면 기본은 통과시킨다 - fireClick 이 스크롤해서 누른다.
+   *
+   * strict=true 는 "단계를 건너뛸지" 판단할 때 쓴다. 거기서는 판정 보류를 통과로
+   * 처리하면 안 된다: 모달 안쪽 아래에 숨어 있어 화면 밖인 [확인] 버튼을 "누를 수
+   * 있다" 고 오판해서, 아직 끝나지 않은 스크롤 단계를 건너뛰어 버렸다(실측).
+   * 건너뛰기는 확실한 근거가 있을 때만 해야 한다. */
+  function hittable(el, strict) {
     var r;
-    try { r = el.getBoundingClientRect(); } catch (e) { return true; }
+    try { r = el.getBoundingClientRect(); } catch (e) { return !strict; }
     var x = r.left + r.width / 2, y = r.top + r.height / 2;
     var W2 = window.innerWidth || 0, H2 = window.innerHeight || 0;
-    if (x < 0 || y < 0 || x > W2 || y > H2) return true;   // 화면 밖 -> 판정 보류
+    if (x < 0 || y < 0 || x > W2 || y > H2) return !strict;   // 화면 밖
     var top;
-    try { top = document.elementFromPoint(x, y); } catch (e) { return true; }
-    if (!top) return true;
+    try { top = document.elementFromPoint(x, y); } catch (e) { return !strict; }
+    if (!top) return !strict;
     return top === el || el.contains(top) || top.contains(el);
   }
 
@@ -558,6 +563,7 @@ try {
   var lastMutAt = 0;
   var retries = 0;
   var blockedEl = null;   // 찾았지만 무언가에 가려 못 누르는 요소
+  var scrollClicks = 0;   // 이번 스크롤 단계에서 몇 번 눌렀는지
   var OURS = '#ke-hud, #ke-editor, #ke-export';
   new MutationObserver(function (muts) {
     for (var i = 0; i < muts.length; i++) {
@@ -678,7 +684,7 @@ try {
       var nx = S.steps[k];
       if (isPay(nx)) return false;
       var nel = locate(nx);
-      if (nel && U.hittable(nel)) {
+      if (nel && U.hittable(nel, true)) {   // strict: 화면 밖이면 건너뛰지 않는다
         log('단계 ' + (S.idx + 1) + ' 건너뜀 (이미 지나간 것으로 보임) -> ' + (k + 1) + '단계로');
         S.skipped = (S.skipped || 0) + (k - S.idx);
         if (!S.skippedList) S.skippedList = [];
@@ -725,6 +731,35 @@ try {
      * 클릭은 모달이 먹는다. 그대로 진행하면 화면은 모달에서 멈춰 있는데 단계만
      * 줄줄이 "성공" 으로 찍히고 결제까지 눌렀다고 보고한다(실측에서 그랬다).
      * 여기서 막아두면 최소한 거짓 완료는 없다. */
+    /* "아래로 스크롤" 은 몇 번 눌러야 하는지 화면 길이에 따라 다르다. 녹화한 횟수
+     * (2번)로 고정하면 모자랄 때 팝업이 안 내려가고, 남으면 다음 단계를 건너뛰게 된다.
+     * 버튼이 사라질 때까지 누르는 게 사이트가 의도한 방식이다. */
+    /* 스크롤이 끝났다는 신호는 사이트마다 다르다:
+     *  - 대한항공: #btnScrollDown 이 숨고 #btnConfirm 이 나타난다 (요소가 사라짐)
+     *  - 같은 버튼의 라벨만 '확인' 으로 바뀌는 형태도 있다
+     * 둘 다 "더 이상 스크롤 버튼이 아니다" 로 판정한다. */
+    var scrollDone = SCROLLY.test(step.text || '') && scrollClicks > 0
+                     && (!el || !SCROLLY.test(U.label(el)));
+    if (scrollDone) {
+      scrollClicks = 0;
+      S.idx++;
+      /* 녹화에는 스크롤이 여러 번 찍혀 있지만 위에서 버튼이 사라질 때까지 눌렀으므로
+       * 뒤따르는 같은 스크롤 단계는 이미 소화된 것이다. 건너뜀으로 세면 멀쩡한 재생이
+       * "확인 필요" 로 보고되므로, 조용히 함께 넘긴다. */
+      var merged = 0;
+      while (S.idx < S.steps.length && SCROLLY.test(S.steps[S.idx].text || '')
+             && S.steps[S.idx].sel === step.sel) {
+        S.idx++;
+        merged++;
+      }
+      retries = 0;
+      save();
+      log('재생 ' + S.idx + '/' + S.steps.length + ': 스크롤 완료'
+          + (merged ? ' (연속 스크롤 ' + (merged + 1) + '단계를 한 번에 처리)' : '')
+          + '  [' + secs(elapsed()) + ']');
+      return;
+    }
+
     if (el && !U.hittable(el)) {
       blockedEl = el;
       el = null;
@@ -785,7 +820,12 @@ try {
     /* "아래로 스크롤" 은 버튼을 누르는 것만으로는 불안하다. 스크롤이 진행되면 버튼
      * 자체가 위로 밀리거나 화면 밖으로 나가서 클릭이 빗나가고, 팝업이 끝까지 안 내려가
      * [확인] 이 안 열린 채 멈춘다. 스크롤 영역을 직접 바닥까지 내려 확실히 한다. */
-    if (SCROLLY.test(step.text || '')) U.scrollToBottom();
+    if (SCROLLY.test(step.text || '')) {
+      U.scrollToBottom();
+      scrollClicks++;
+      if (scrollClicks < 20) { save(); return; }   // 버튼이 사라질 때까지 같은 단계를 반복
+      scrollClicks = 0;
+    }
 
     S.idx++;
     retries = 0;

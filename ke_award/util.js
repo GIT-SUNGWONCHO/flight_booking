@@ -20,16 +20,21 @@
    * 모달이 떠 있으면 그 뒤의 버튼도 getBoundingClientRect/opacity 상으로는 멀쩡히
    * 보이지만, 실제로 클릭하면 모달이 먹는다. 그 좌표에서 실제로 잡히는 요소가
    * 자기 자신(또는 조상/자손)인지로 판정한다.
-   * 화면 밖이라 판정이 불가능하면 통과시킨다 - fireClick 이 스크롤해서 누른다. */
-  function hittable(el) {
+   * 화면 밖이라 판정이 불가능하면 기본은 통과시킨다 - fireClick 이 스크롤해서 누른다.
+   *
+   * strict=true 는 "단계를 건너뛸지" 판단할 때 쓴다. 거기서는 판정 보류를 통과로
+   * 처리하면 안 된다: 모달 안쪽 아래에 숨어 있어 화면 밖인 [확인] 버튼을 "누를 수
+   * 있다" 고 오판해서, 아직 끝나지 않은 스크롤 단계를 건너뛰어 버렸다(실측).
+   * 건너뛰기는 확실한 근거가 있을 때만 해야 한다. */
+  function hittable(el, strict) {
     var r;
-    try { r = el.getBoundingClientRect(); } catch (e) { return true; }
+    try { r = el.getBoundingClientRect(); } catch (e) { return !strict; }
     var x = r.left + r.width / 2, y = r.top + r.height / 2;
     var W2 = window.innerWidth || 0, H2 = window.innerHeight || 0;
-    if (x < 0 || y < 0 || x > W2 || y > H2) return true;   // 화면 밖 -> 판정 보류
+    if (x < 0 || y < 0 || x > W2 || y > H2) return !strict;   // 화면 밖
     var top;
-    try { top = document.elementFromPoint(x, y); } catch (e) { return true; }
-    if (!top) return true;
+    try { top = document.elementFromPoint(x, y); } catch (e) { return !strict; }
+    if (!top) return !strict;
     return top === el || el.contains(top) || top.contains(el);
   }
 
