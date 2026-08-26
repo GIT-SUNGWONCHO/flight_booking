@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8"><title>동의 2개 시뮬레이터</title>
+<style>body{font:14px sans-serif;padding:20px}
+ button{padding:8px 14px;margin:4px;border:1px solid #333;background:#fff}
+ button[aria-pressed="true"]{background:#222;color:#fff}
+ #m{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center}
+ #m.on{display:flex} .box{background:#fff;padding:20px;border-radius:8px;width:400px}
+ .body{height:120px;overflow-y:auto;border:1px solid #ddd} .filler{height:800px}</style>
+<body>
+<!-- 실제 흐름: 동의 항목마다 모달이 따로 뜨고, 각각 끝까지 스크롤해야 [확인] 이 열린다.
+     확인을 눌러야 비로소 그 항목이 동의된다. -->
+<button id="a1" aria-pressed="false">동의</button>
+<button id="a3" aria-pressed="false">동의</button>
+<button id="pay">결제하기</button>
+<div id="m"><div class="box"><h3 id="mt"></h3>
+  <div class="body"><div class="filler"></div></div>
+  <button id="btnScrollDown">아래로 스크롤</button>
+  <button id="btnConfirm" style="display:none">확인</button>
+</div></div>
+<script>
+var need = 2, n = 0, cur = null;
+window.__payClicks = 0; window.__confirmed = [];
+function open(which, title){
+  cur = which; n = 0;
+  document.getElementById('mt').textContent = title;
+  document.getElementById('btnScrollDown').style.display = '';
+  document.getElementById('btnConfirm').style.display = 'none';
+  document.getElementById('m').className = 'on';
+}
+document.getElementById('a1').onclick = function(){
+  if (this.getAttribute('aria-pressed') === 'true') { this.setAttribute('aria-pressed','false'); window.__off = true; return; }
+  open('a1', '운송약관');
+};
+document.getElementById('a3').onclick = function(){
+  if (this.getAttribute('aria-pressed') === 'true') { this.setAttribute('aria-pressed','false'); window.__off = true; return; }
+  open('a3', '리튬 보조배터리 및 위험품 안내');
+};
+document.getElementById('btnScrollDown').onclick = function(){
+  n++;
+  if (n >= need) { this.style.display = 'none'; document.getElementById('btnConfirm').style.display = ''; }
+};
+document.getElementById('btnConfirm').onclick = function(){
+  document.getElementById('m').className = '';
+  document.getElementById(cur).setAttribute('aria-pressed','true');
+  window.__confirmed.push(cur);
+};
+document.getElementById('pay').onclick = function(){ window.__payClicks++; };
+</script>
+</body>

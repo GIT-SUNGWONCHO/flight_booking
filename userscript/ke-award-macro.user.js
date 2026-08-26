@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.13.0
+// @version      1.14.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -377,7 +377,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.13.0', hash: '7987783' };
+  var B = { version: '1.14.0', hash: '057da37' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -389,7 +389,7 @@ try {
 // ---------- steps ----------
 try {
 (function () {
-  var S = [{"dynamicDate":true,"idPrefix":"dep-fare-","sel":"#dep-fare-5-1","text":"(날짜: 매번 최신 오픈일 자동 감지 - 16 08월 16일 (월) , 성수기 일반석 은 녹화 당시 예시)","tag":"td","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"sel":"#ac0e9a2f7f9ead9dbd368853f47deb65CalendarFareBonusMain > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host","text":"검색","tag":"kds-button_1","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"dynamicCabin":true,"sel":"","text":"(좌석: 패널에서 고른 등급을 매번 다시 찾음 - 녹화 당시는 '항공편명 KE901 일반석 52,500 마일')","tag":"label","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#payment-widget > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button > kds-button_1.--wds-ui.ui-button__host","text":"다음","tag":"kds-button_1","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#submit-passenger-ADT-0","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#submit-contact","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-3","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnAwardUseMileageApply","text":"적용","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted","text":"Npay","tag":"label","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-payment","text":"결제하기 새 창 열림","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false}];
+  var S = [{"dynamicDate":true,"idPrefix":"dep-fare-","sel":"#dep-fare-5-1","text":"(날짜: 매번 최신 오픈일 자동 감지 - 16 08월 16일 (월) , 성수기 일반석 은 녹화 당시 예시)","tag":"td","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"sel":"#ac0e9a2f7f9ead9dbd368853f47deb65CalendarFareBonusMain > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host","text":"검색","tag":"kds-button_1","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"dynamicCabin":true,"sel":"","text":"(좌석: 패널에서 고른 등급을 매번 다시 찾음 - 녹화 당시는 '항공편명 KE901 일반석 52,500 마일')","tag":"label","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#payment-widget > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button > kds-button_1.--wds-ui.ui-button__host","text":"다음","tag":"kds-button_1","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#submit-passenger-ADT-0","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#submit-contact","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-3","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnAwardUseMileageApply","text":"적용","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted","text":"Npay","tag":"label","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-payment","text":"결제하기 새 창 열림","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false}];
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
   try { W.KE_STEPS_BAKED = S; } catch (e) {}
@@ -1212,6 +1212,8 @@ try {
   var S = {
     targetKst: '',        // "2026-08-22 10:00:00"
     leadMs: 150,          // 네트워크 지연 보정: 이만큼 먼저 발사
+    pos: null,            // 패널 위치 {left, top}. 사이트 UI 를 가리면 옮길 수 있게
+                          // 드래그해서 옮긴 자리를 기억한다
     armed: false
   };
   try { Object.assign(S, JSON.parse(localStorage.getItem(LS) || '{}')); } catch (e) {}
@@ -1522,7 +1524,15 @@ try {
       '<button id="ke-rehearse" style="background:#c80;width:100%">연습 (10초 뒤 발사)</button>' +
       '<button id="ke-arm" style="background:#2a7;width:100%">▶ 대기 시작</button>' +
       '<div id="ke-status"></div><div id="ke-toast"></div>' +
+      '<div style="font-size:10px;color:#888;margin-top:4px">제목을 끌어 옮길 수 있음 · Alt+P 로 셀렉터 집기</div>' +
       '</div>';
+    if (S.pos) {
+      root.style.left = S.pos.left + 'px';
+      root.style.top = S.pos.top + 'px';
+      root.style.right = 'auto';
+    }
+    makeDraggable(root, root.querySelector('h4'));
+
     var B = W.KE_BUILD || window.KE_BUILD;
     var ver = root.querySelector('#ke-ver');
     /* 어떤 빌드가 로드됐는지 한눈에 보이게 한다. 버전을 안 올려서 이전 스크립트로
@@ -1627,6 +1637,86 @@ try {
   }
   mount();
   setInterval(mount, 1000);   // 사라지면 1초 안에 복구
+
+  /* 패널을 드래그해서 옮긴다. 기본 자리가 사이트 버튼을 가리는 경우가 있는데,
+   * 그러면 화면을 눈으로 확인하기 어려워 도구를 안 쓰게 된다. */
+  function makeDraggable(el, handle) {
+    var dx = 0, dy = 0, dragging = false;
+    handle.style.cursor = 'move';
+    handle.addEventListener('mousedown', function (e) {
+      if (e.target.id === 'ke-min') return;
+      dragging = true;
+      var r = el.getBoundingClientRect();
+      dx = e.clientX - r.left; dy = e.clientY - r.top;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      var left = Math.max(0, Math.min(window.innerWidth - 60, e.clientX - dx));
+      var top = Math.max(0, Math.min(window.innerHeight - 30, e.clientY - dy));
+      el.style.left = left + 'px';
+      el.style.top = top + 'px';
+      el.style.right = 'auto';
+    });
+    document.addEventListener('mouseup', function () {
+      if (!dragging) return;
+      dragging = false;
+      var r = el.getBoundingClientRect();
+      S.pos = { left: Math.round(r.left), top: Math.round(r.top) };
+      save();
+    });
+  }
+
+  /* Alt+P: 다음에 클릭하는 요소의 셀렉터를 집는다 (실제로 눌리지는 않는다).
+   * 모달이 떠 있으면 패널을 만질 수 없어서 셀렉터를 알아낼 방법이 없었다.
+   * 키보드는 모달과 무관하게 먹으므로 그 상황에서도 쓸 수 있다. */
+  var picking = false;
+  function startPick() {
+    picking = true;
+    document.body.style.cursor = 'crosshair';
+    setStatus('Alt+P: 셀렉터를 집을 요소를 클릭하세요 (ESC 취소)');
+    toast('클릭할 요소를 고르세요 - 실제로 눌리지는 않습니다');
+  }
+  function stopPick() { picking = false; try { document.body.style.cursor = ''; } catch (e) {} }
+
+  function showPicked(el) {
+    var U2 = W.KE_UTIL || window.KE_UTIL;
+    var sel = U2.cssPath(el), lab = U2.label(el);
+    var text = sel + String.fromCharCode(10) + lab;
+    try { navigator.clipboard.writeText(sel); } catch (e) {}
+    var box = document.createElement('div');
+    box.id = 'ke-picked';
+    box.style.cssText = 'position:fixed;left:50%;top:20px;transform:translateX(-50%);'
+      + 'z-index:2147483647;background:#0b4da2;color:#fff;padding:12px 14px;border-radius:8px;'
+      + 'font:12px/1.5 monospace;max-width:90vw;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+    box.innerHTML = '<b style="font-family:sans-serif">집은 셀렉터 (클립보드에 복사됨)</b>'
+      + '<textarea readonly style="width:min(700px,86vw);height:56px;margin-top:8px;'
+      + 'font:11px monospace"></textarea>'
+      + '<div style="text-align:right"><button style="padding:4px 10px">닫기</button></div>';
+    document.documentElement.appendChild(box);
+    var ta = box.querySelector('textarea');
+    ta.value = text;
+    ta.select();
+    box.querySelector('button').onclick = function () { box.remove(); };
+    console.log('%c[KE_HUD] 집은 셀렉터: ' + sel, 'color:#0b4da2;font-weight:bold');
+    setStatus('집은 셀렉터: ' + sel.slice(0, 60));
+  }
+
+  document.addEventListener('click', function (ev) {
+    if (!picking) return;
+    if (ev.target.closest && ev.target.closest('#ke-hud, #ke-picked')) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    var U2 = W.KE_UTIL || window.KE_UTIL;
+    var el = ev.target.closest(U2.CLICKABLE) || ev.target;
+    stopPick();
+    showPicked(el);
+  }, true);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); startPick(); }
+    else if (e.key === 'Escape' && picking) { stopPick(); toast('집기 취소'); }
+  }, true);
 
   expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount,
                      rehearse: rehearse,

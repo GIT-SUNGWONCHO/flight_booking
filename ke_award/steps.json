@@ -8,13 +8,15 @@
     "제거: 1번째 단계(달력 컨테이너 전체를 감싸는 클릭) - 06:03 녹화에선 #panel-0, 08:57 녹화에선 전혀 다른 구조 셀렉터로 잡힘. 셀렉터가 세션마다 안정적이지 않다는 뜻이라 실전에서 못 찾고 20초를 날릴 위험이 큼. URL 이동도 없어서 다음 단계(날짜 클릭) 동작에 꼭 필요한지 의심스러움",
     "추가: #btnAwardUseMileageApply (적용) - 08:57 녹화에서 새로 잡힘. 마일리지 결제 적용 버튼, 06:03 녹화엔 빠져있던 실제로 필요한 단계",
     "핵심 변경: 날짜 셀을 특정 텍스트/id 대신 dynamicDate=true 로 바꿈 - 마일리지는 매일 09:00 KST 에 하루치씩 새로 열려서(08/21 08:57엔 16일이 최신, 08/22엔 17일이 최신이었음을 실측으로 확인) 특정 날짜를 저장해두는 방식 자체가 구조적으로 매일 깨짐. 대신 재생 시점에 '[id^=\"dep-fare-\"] 중 요금등급 글자(일반석/프레스티지 등)가 붙은 것 중 DOM 순서상 마지막' 을 매번 다시 찾도록 util.js 에 findLatestOpenDate() 추가",
-    "복원: 두 번째 #btnConfirm(확인) - 앞서 '11번과 같은 버튼의 껍데기라 중복' 으로 지웠는데, 실측 재생에서 마지막에 '운임 규정 상세 보기' 모달이 열린 채로 남았다. 동의 항목마다 모달이 따로 뜨고 각각 확인해야 하는 것으로 보인다. 되돌린다."
+    "복원: 두 번째 #btnConfirm(확인) - 앞서 '11번과 같은 버튼의 껍데기라 중복' 으로 지웠는데, 실측 재생에서 마지막에 '운임 규정 상세 보기' 모달이 열린 채로 남았다. 동의 항목마다 모달이 따로 뜨고 각각 확인해야 하는 것으로 보인다. 되돌린다.",
+    "재구성: 확인 및 동의 구간. 녹화는 '동의1 -> 동의2 -> 스크롤x2 -> 확인 -> 동의1(중복) -> 확인' 이었는데, 실제로는 동의 항목마다 모달이 따로 뜨고 각각 끝까지 스크롤한 뒤 확인해야 한다. '동의1 -> 스크롤 -> 확인 -> 동의2 -> 스크롤 -> 확인' 으로 바꿨다. 스크롤은 버튼이 사라질 때까지 반복하므로 단계당 하나면 된다. 중복 동의1 은 제거(토글이라 다시 누르면 꺼진다)."
   ],
   "verify": [
-    "#btn-resv-agree-1(동의) 이 (7번/12번) 두 번 등장 - 두 세션 모두 동일 패턴이라 실수보다는 화면 재렌더로 실제 필요했을 가능성이 높음. 토글 버튼이라 잘못 재클릭하면 동의가 꺼질 수 있으니, 재생 테스트에서 마지막에 두 동의가 모두 켜진 채로 끝나는지 반드시 눈으로 확인",
     "검색 버튼 셀렉터 앞부분에 세션마다 바뀌는 해시 id(ac0e9a2f7f9ead9dbd368853f47deb65...)가 붙어있어 실전에서는 거의 확실히 매칭 실패 -> 텍스트 폴백('검색')으로 잡힐 것. 이 단계는 '고정'(selectorOnly) 켜지 말 것",
     "findLatestOpenDate() 의 '요금등급 글자 = 예약 가능' 가정은 사용자가 실사이트에서 맞다고 확인함 (2026-08-24)",
-    "실측 재생에서 자동클릭(KE_AUTO)이 재생과 충돌해 7단계가 10초 지연됐고, 재생 종료 후에도 팝업을 눌렀다. 이제 재생 시작 시 자동클릭을 끈다 - 재생 로그에 '자동클릭 일시 정지' 가 찍히는지 확인할 것"
+    "실측 재생에서 자동클릭(KE_AUTO)이 재생과 충돌해 7단계가 10초 지연됐고, 재생 종료 후에도 팝업을 눌렀다. 이제 재생 시작 시 자동클릭을 끈다 - 재생 로그에 '자동클릭 일시 정지' 가 찍히는지 확인할 것",
+    "동의 구간은 사용자 확인(2026-08-25): 두 번째 동의(리튬 보조배터리/위험품)도 아래로 스크롤 후 확인이 필요하다",
+    "확인 버튼 셀렉터는 사용자가 두 번째 모달이 열린 상태에서 실측한 값 (2026-08-25): #btnConfirm > kds-button_1.--wds-ui.ui-button__host. 두 모달 모두 같은 id 를 쓴다. selectorOnly 는 끄고 텍스트 '확인' 폴백을 남겨둔다."
   ],
   "steps": [
     {
@@ -70,20 +72,6 @@
       "selectorOnly": false
     },
     {
-      "sel": "#btn-resv-agree-3",
-      "text": "동의",
-      "tag": "button",
-      "url": "/payment/gate/RT/NR",
-      "selectorOnly": false
-    },
-    {
-      "sel": "#btnScrollDown > kds-button_1.--wds-ui.ui-button__host",
-      "text": "아래로 스크롤",
-      "tag": "kds-button_1",
-      "url": "/payment/gate/RT/NR",
-      "selectorOnly": false
-    },
-    {
       "sel": "#btnScrollDown > kds-button_1.--wds-ui.ui-button__host",
       "text": "아래로 스크롤",
       "tag": "kds-button_1",
@@ -98,16 +86,23 @@
       "selectorOnly": false
     },
     {
-      "sel": "#btn-resv-agree-1",
+      "sel": "#btn-resv-agree-3",
       "text": "동의",
       "tag": "button",
       "url": "/payment/gate/RT/NR",
       "selectorOnly": false
     },
     {
-      "sel": "#btnConfirm",
+      "sel": "#btnScrollDown > kds-button_1.--wds-ui.ui-button__host",
+      "text": "아래로 스크롤",
+      "tag": "kds-button_1",
+      "url": "/payment/gate/RT/NR",
+      "selectorOnly": false
+    },
+    {
+      "sel": "#btnConfirm > kds-button_1.--wds-ui.ui-button__host",
       "text": "확인",
-      "tag": "button",
+      "tag": "kds-button_1",
       "url": "/payment/gate/RT/NR",
       "selectorOnly": false
     },
