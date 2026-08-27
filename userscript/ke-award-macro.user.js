@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.15.0
+// @version      1.16.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -418,7 +418,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.15.0', hash: '4c0dad1' };
+  var B = { version: '1.16.0', hash: 'd1bb466' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -430,7 +430,7 @@ try {
 // ---------- steps ----------
 try {
 (function () {
-  var S = [{"dynamicDate":true,"idPrefix":"dep-fare-","sel":"#dep-fare-5-1","text":"(날짜: 매번 최신 오픈일 자동 감지 - 16 08월 16일 (월) , 성수기 일반석 은 녹화 당시 예시)","tag":"td","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"sel":"#ac0e9a2f7f9ead9dbd368853f47deb65CalendarFareBonusMain > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host","text":"검색","tag":"kds-button_1","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"dynamicCabin":true,"sel":"","text":"(좌석: 패널에서 고른 등급을 매번 다시 찾음 - 녹화 당시는 '항공편명 KE901 일반석 52,500 마일')","tag":"label","url":"/booking/select-award-flight/departure","selectorOnly":false},{"ensure":"KRW","sel":"","text":"통화","tag":"button","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#payment-widget > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button > kds-button_1.--wds-ui.ui-button__host","text":"다음","tag":"kds-button_1","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#submit-passenger-ADT-0","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#submit-contact","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-3","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnAwardUseMileageApply","text":"적용","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted","text":"Npay","tag":"label","url":"/payment/gate/RT/NR","selectorOnly":false,"alt":[{"sel":"","text":"한국발행 신용/체크카드","selectorOnly":false},{"sel":"","text":"하나카드(구 외환, 하나SK)","selectorOnly":false}]},{"sel":"#btn-payment","text":"결제하기 새 창 열림","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false}];
+  var S = [{"dynamicDate":true,"idPrefix":"dep-fare-","sel":"#dep-fare-5-1","text":"(날짜: 매번 최신 오픈일 자동 감지 - 16 08월 16일 (월) , 성수기 일반석 은 녹화 당시 예시)","tag":"td","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"sel":"#ac0e9a2f7f9ead9dbd368853f47deb65CalendarFareBonusMain > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host","text":"검색","tag":"kds-button_1","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"dynamicCabin":true,"sel":"","text":"(좌석: 패널에서 고른 등급을 매번 다시 찾음 - 녹화 당시는 '항공편명 KE901 일반석 52,500 마일')","tag":"label","url":"/booking/select-award-flight/departure","selectorOnly":false},{"ensure":"KRW","sel":"#currencyBtn","text":"통화","tag":"button","url":"/booking/select-award-flight/departure","selectorOnly":false,"optionSel":"#filter-currency > div.filter__contents > div.filter__list > div.selection.filter__item:nth-of-type(2) > label","applySel":"#filter-currency > div.filter__contents > button.filter__apply:nth-of-type(1)","applyText":"적용"},{"sel":"#payment-widget > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button > kds-button_1.--wds-ui.ui-button__host","text":"다음","tag":"kds-button_1","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#submit-passenger-ADT-0","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#submit-contact","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-3","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnAwardUseMileageApply","text":"적용","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted","text":"Npay","tag":"label","url":"/payment/gate/RT/NR","selectorOnly":false,"alt":[{"sel":"","text":"한국발행 신용/체크카드","selectorOnly":false}]},{"ensure":"현대카드","optional":true,"sel":"","text":"한국발행 신용/체크카드 종류","tag":"select","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-payment","text":"결제하기 새 창 열림","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false}];
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
   try { W.KE_STEPS_BAKED = S; } catch (e) {}
@@ -517,6 +517,7 @@ try {
      * 그래서 재생이 끝나면 결제창이 실제로 떴는지 확인하라고 알린다. */
     allowPay: true,
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
+    optionalMs: 2500,     // optional 단계를 이만큼 기다려보고 없으면 넘어간다
     gapMs: 80,            // 클릭 사이 최소 간격
     settleMs: 250,        // 이만큼 화면이 잠잠해야 다음 단계를 누른다
     maxSettleMs: 2500,    // 계속 바뀌기만 하면 이 시간 뒤에는 그냥 누른다
@@ -660,7 +661,7 @@ try {
   var retries = 0;
   var blockedEl = null;   // 찾았지만 무언가에 가려 못 누르는 요소
   var scrollClicks = 0;   // 이번 스크롤 단계에서 몇 번 눌렀는지
-  var ensureOpened = false;  // ensure 단계에서 목록을 열어둔 상태인지
+  var ensurePhase = 0;    // ensure 진행 단계: 0 시작 / 1 목록 열림 / 2 적용 대기
   var OURS = '#ke-hud, #ke-editor, #ke-export';
   new MutationObserver(function (muts) {
     for (var i = 0; i < muts.length; i++) {
@@ -719,7 +720,7 @@ try {
     S.playing = true;
     if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.problem = false; }
     scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
-    ensureOpened = false;
+    ensurePhase = 0;
     retries = 0;
     waitingSince = 0;
     save();
@@ -817,44 +818,104 @@ try {
      *   1) 컨트롤 라벨에 want 가 이미 있으면 -> 통과
      *   2) 없으면 컨트롤을 눌러 목록을 연다
      *   3) 목록에서 want 가 든 항목을 눌러 맞춘다 */
+    /* ensure 단계: "지금 값이 want 면 그대로 두고, 아니면 골라서 맞춘다".
+     * 통화(KRW/USD)나 카드 종류처럼 화면 상태에 따라 손대야 할 수도 아닐 수도 있는 것.
+     *
+     * 실제 대한항공 통화 선택은 3단계다: #currencyBtn 을 눌러 모달을 열고 -> KRW 라디오
+     * 라벨을 고르고 -> [적용] 을 눌러야 반영된다. 적용을 빠뜨리면 모달만 열렸다 닫히고
+     * 통화는 그대로다. 그래서 optionSel/applySel 을 단계에 적어둔다.
+     * 네이티브 <select> 면 클릭으로는 목록이 안 열리므로 value 를 직접 바꾼다. */
     if (step.ensure) {
-      var ctrl = U.findEl(step.sel, step.text, { selectorOnly: step.selectorOnly })
-                 || U.findContaining(step.text);   // '통화 KRW' 처럼 라벨이 상태를 담는다
-      if (ctrl && U.label(ctrl).indexOf(step.ensure) !== -1) {
-        S.idx++; retries = 0; waitingSince = 0; ensureOpened = false; save();
-        log('재생 ' + S.idx + '/' + S.steps.length + ': 이미 ' + step.ensure
-            + ' 이라 그대로 둠  [' + secs(elapsed()) + ']');
+      var ctrl = (step.sel ? U.findEl(step.sel, '', { selectorOnly: true }) : null)
+                 || U.findContaining(step.text);
+
+      var doneEnsure = function (how) {
+        ensurePhase = 0;
+        S.idx++; retries = 0; waitingSince = 0; lastClickAt = now; save();
+        log('재생 ' + S.idx + '/' + S.steps.length + ': ' + how + '  [' + secs(elapsed()) + ']');
+      };
+
+      // --- 네이티브 select ---
+      var nsel = ctrl && (ctrl.tagName === 'SELECT'
+                          ? ctrl : (ctrl.querySelector && ctrl.querySelector('select')));
+      if (nsel) {
+        var cur = nsel.options[nsel.selectedIndex];
+        if (cur && cur.text.indexOf(step.ensure) !== -1) { doneEnsure('이미 ' + step.ensure); return; }
+        for (var k2 = 0; k2 < nsel.options.length; k2++) {
+          if (nsel.options[k2].text.indexOf(step.ensure) === -1) continue;
+          nsel.selectedIndex = k2;
+          try {
+            nsel.dispatchEvent(new Event('input', { bubbles: true }));
+            nsel.dispatchEvent(new Event('change', { bubbles: true }));
+          } catch (e) {}
+          doneEnsure(step.ensure + ' 로 맞춤 (select)');
+          return;
+        }
+        if (now - waitingSince > S.stepTimeoutMs) {
+          finish('목록에 ' + step.ensure + ' 가 없습니다 - 직접 선택하세요', true);
+        }
         return;
       }
-      if (!ensureOpened) {
-        if (!ctrl) {   // 컨트롤 자체를 아직 못 찾음 -> 아래 공통 대기 로직으로
+
+      // --- 0) 이미 맞는가 / 컨트롤 열기 ---
+      if (ensurePhase === 0) {
+        if (ctrl && U.label(ctrl).indexOf(step.ensure) !== -1) {
+          doneEnsure('이미 ' + step.ensure + ' 이라 그대로 둠');
+          return;
+        }
+        if (!ctrl) {
           if (!waitingSince) waitingSince = now;
+          /* optional: 이 화면에 아예 없을 수 있는 단계 (네이버페이로 결제하면
+           * 카드 종류 드롭다운이 나타나지 않는다). 잠깐 기다려보고 없으면 넘어간다. */
+          if (step.optional && now - waitingSince > (S.optionalMs || 2500)) {
+            S.idx++; retries = 0; waitingSince = 0; save();
+            log('재생 ' + S.idx + '/' + S.steps.length + ': 이 화면에 없어 건너뜀 - '
+                + (step.text || step.sel).slice(0, 20));
+            return;
+          }
           if (now - waitingSince > S.stepTimeoutMs) {
-            finish('단계 ' + (S.idx + 1) + ' 통화 컨트롤을 못 찾음: ' + (step.text || step.sel), true);
+            finish('단계 ' + (S.idx + 1) + ' 컨트롤을 못 찾음: ' + (step.text || step.sel), true);
           }
           return;
         }
         if (!U.hittable(ctrl)) return;
         lastClickAt = now;
         U.fireClick(ctrl);
-        ensureOpened = true;
-        log('통화 목록을 엽니다 (지금 값이 ' + step.ensure + ' 가 아님)');
+        ensurePhase = 1;
+        waitingSince = now;
+        log(step.ensure + ' 로 바꾸기 위해 목록을 엽니다');
         return;
       }
-      // 목록이 열렸다 - want 가 든 항목을 고른다
-      var opt = U.findContaining(step.ensure, ctrl);
-      if (!opt) {
+
+      // --- 1) 원하는 항목 고르기 ---
+      if (ensurePhase === 1) {
+        var opt = (step.optionSel ? U.findEl(step.optionSel, '', { selectorOnly: true }) : null)
+                  || U.findContaining(step.ensure, ctrl);
+        if (!opt) {
+          if (now - waitingSince > S.stepTimeoutMs) {
+            finish('목록에서 ' + step.ensure + ' 를 못 찾았습니다 - 직접 선택하세요', true);
+          }
+          return;
+        }
+        lastClickAt = now;
+        U.fireClick(opt);
+        if (step.applySel || step.applyText) { ensurePhase = 2; waitingSince = now; return; }
+        doneEnsure(step.ensure + ' 로 맞춤');
+        return;
+      }
+
+      // --- 2) [적용] 눌러 반영 ---
+      var ap = (step.applySel ? U.findEl(step.applySel, '', { selectorOnly: true }) : null)
+               || U.findContaining(step.applyText || '적용');
+      if (!ap) {
         if (now - waitingSince > S.stepTimeoutMs) {
-          finish('통화 목록에서 ' + step.ensure + ' 를 못 찾았습니다 - 직접 선택하세요', true);
+          finish('[적용] 을 못 찾았습니다 - 직접 눌러주세요', true);
         }
         return;
       }
       lastClickAt = now;
-      U.fireClick(opt);
-      ensureOpened = false;
-      S.idx++; retries = 0; waitingSince = 0; save();
-      log('재생 ' + S.idx + '/' + S.steps.length + ': ' + step.ensure
-          + ' 로 맞춤  [' + secs(elapsed()) + ']');
+      U.fireClick(ap);
+      doneEnsure(step.ensure + ' 로 맞추고 적용');
       return;
     }
 
@@ -939,6 +1000,13 @@ try {
     }
     if (!el) {
       if (!waitingSince) waitingSince = now;
+      /* optional: 이 화면에 아예 없을 수 있는 단계. 기다려보고 없으면 조용히 넘어간다. */
+      if (step.optional && !blockedEl && now - waitingSince > (S.optionalMs || 2500)) {
+        S.idx++; retries = 0; waitingSince = 0; save();
+        log('재생 ' + S.idx + '/' + S.steps.length + ': 이 화면에 없어 건너뜀 - '
+            + (step.text || step.sel).slice(0, 20) + '  [' + secs(elapsed()) + ']');
+        return;
+      }
       /* 스크롤 단계인데 버튼을 못 찾는 경우: 버튼이 스크롤에 밀려 사라졌거나 라벨이
        * 바뀐 것일 수 있다. 그래도 팝업은 끝까지 내려야 [확인] 이 열리므로, 버튼과
        * 무관하게 스크롤 자체는 계속 밀어준다. */

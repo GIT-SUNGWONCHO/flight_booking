@@ -32,10 +32,15 @@ def check(ok: bool, label: str, detail: str = "") -> None:
 STEPS = """() => {
   const R = window.KE_REC;
   R.state.steps = [
-    {ensure:'KRW', sel:'', text:'통화', tag:'button', url:'/x'},
+    {ensure:'KRW', sel:'#currencyBtn', text:'통화', tag:'button', url:'/x',
+     optionSel:'#filter-currency .filter__list .filter__item:nth-of-type(2) > label',
+     applySel:'#filter-currency .filter__apply', applyText:'적용'},
     {sel:'', text:'Npay', tag:'button', url:'/x',
-     alt:[{sel:'', text:'한국발행 신용/체크카드'}]}
+     alt:[{sel:'', text:'한국발행 신용/체크카드'}]},
+    {ensure:'현대카드', optional:true, sel:'', text:'한국발행 신용/체크카드 종류',
+     tag:'button', url:'/x'}
   ];
+  R.state.optionalMs = 700;
   R.state.idx = 0; R.state.startedAt = 0; R.state.problem = false;
   R.state.stepTimeoutMs = 6000;
   R.play();
@@ -54,10 +59,10 @@ def main() -> int:
             pg.set_default_timeout(30000)
             ctx.add_init_script(js)
 
-            for query, cur_label, npay, want_cur, want_pick, want_clicks in (
-                ("?cur=KRW", "이미 KRW", True, "KRW", "npay", 0),
-                ("?cur=USD", "USD 로 시작", True, "KRW", "npay", 1),
-                ("?cur=USD&npay=0", "USD + 네이버페이 없음", False, "KRW", "card", 1),
+            for query, cur_label, want_cur, want_pick, want_clicks, want_ct in (
+                ("?cur=KRW", "이미 KRW", "KRW", "npay", 0, None),
+                ("?cur=USD", "USD 로 시작", "KRW", "npay", 1, None),
+                ("?cur=USD&npay=0", "네이버페이 없음(오는 편)", "KRW", "card", 1, "현대카드"),
             ):
                 pg.goto(BASE + query, timeout=60000)
                 pg.wait_for_timeout(400)
@@ -66,13 +71,24 @@ def main() -> int:
                 st = pg.evaluate("""() => ({
                   cur: document.getElementById('curval').textContent,
                   clicks: window.__curClicks, picked: window.__picked,
+                  applied: window.__applied || 0,
+                  ct: (document.getElementById('ctval')||{}).textContent || null,
+                  ctClicks: window.__ctClicks || 0,
                   idx: KE_REC.state.idx, total: KE_REC.state.steps.length,
                   problem: KE_REC.state.problem})""")
                 check(st["cur"] == want_cur, f"{cur_label}: 통화가 {want_cur} (실제 {st['cur']})")
+                check(st["applied"] == want_clicks,
+                      f"{cur_label}: [적용] 을 {want_clicks}회 눌렀다 (실제 {st['applied']})")
                 check(st["clicks"] == want_clicks,
                       f"{cur_label}: 필요할 때만 통화를 건드림 (클릭 {st['clicks']}회, 기대 {want_clicks})")
                 check(st["picked"] == want_pick,
                       f"{cur_label}: 결제수단 {want_pick} 선택 (실제 {st['picked']})")
+                if want_ct:
+                    check(st["ct"] == want_ct,
+                          f"{cur_label}: 카드 종류가 {want_ct} (실제 {st['ct']})")
+                else:
+                    check(st["ctClicks"] == 0,
+                          f"{cur_label}: 카드 종류 단계는 없으니 건너뜀 (클릭 {st['ctClicks']}회)")
                 check(st["idx"] == st["total"] and not st["problem"],
                       f"{cur_label}: 끝까지 진행 ({st['idx']}/{st['total']}, problem={st['problem']})")
         finally:
