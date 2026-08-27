@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.20.0
+// @version      1.21.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -412,6 +412,27 @@ try {
     return n;
   }
 
+  /** 조회 화면이 "어느 날을 조회 중인지". "MM-DD" 또는 null.
+   *
+   * 주소에는 날짜가 없고(/departure 뿐), 서버 응답의 departureDate 는 좌석이 있을
+   * 때만 나온다. 그런데 우리가 정작 알아야 하는 순간은 좌석이 아직 없을 때다 -
+   * 09:00 직전에 목표 날짜로 맞춰두고 기다리는 상황이 그것이다.
+   *
+   * 그때 남는 근거는 검색 위젯의 날짜 입력칸뿐이다(실측 라벨: "08월 21일 (토)").
+   * 왕복이면 가는 날/오는 날 둘이 있으므로 첫 번째를 쓴다. */
+  var DATEINPUT = 'kds-dateinput, [class*="ui-dateinput__host"], [class*="-dateinput"]';
+
+  function searchedDate() {
+    var els;
+    try { els = document.querySelectorAll(DATEINPUT); } catch (e) { return null; }
+    for (var i = 0; i < els.length; i++) {
+      if (!visible(els[i])) continue;
+      var md = monthDay(label(els[i]));
+      if (md) return md;
+    }
+    return null;
+  }
+
   // ---- 달력 건너뛰기(바로 시작) ------------------------------------------
   /* 실측 27.7초 중 절반 이상이 대한항공 페이지가 그려지기를 기다린 시간이다.
    * 우리 폴링을 조여봐야 몇 밀리초다. 남은 방법은 페이지를 덜 거치는 것 하나뿐이라,
@@ -484,7 +505,7 @@ try {
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
-    onDeparture: onDeparture, urlDates: urlDates, retarget: retarget,
+    onDeparture: onDeparture, searchedDate: searchedDate, urlDates: urlDates, retarget: retarget,
     nextYearFor: nextYearFor,
     alreadyOn: alreadyOn
   };
@@ -502,7 +523,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.20.0', hash: '9d4ed4b' };
+  var B = { version: '1.21.0', hash: '382789a' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -532,23 +553,29 @@ try {
   var W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   if (W.KE_PROBE) return;
 
-  var MAX = 12;            // 최근 몇 건까지 들고 있을지
+  var MAX = 40;            // 최근 몇 건까지 들고 있을지
   var CAP = 200000;        // 한 건당 글자 수 상한 (localStorage 가 아니라 메모리다)
   var hits = [];
+  var stamp = 0;         // 기록이 늘 때마다 증가. 화면 갱신 여부를 값싸게 판단한다
 
   /* 좌석/운임 조회로 보이는 응답만 남긴다. 전부 남기면 로그인 토큰 같은 것까지
    * 딸려 들어와 내보내기가 위험해진다. */
-  var WANTED = /(availab|award|bonus|flight|fare|segment|seat)/i;
-  var SEATY = /"(remain\w*|avail\w*Seat\w*|seat\w*Count|numberOfSeats?|bookableSeats?)"\s*:/i;
+  var WANTED = /(availab|award|bonus|flight|fare|segment|seat|payment)/i;
+  /* 실측에서 걸러야 했던 것들. 구글 애널리틱스는 현재 주소를 파라미터로 실어 보내서
+   * 'select-award-flight' 가 그 안에 들어가 WANTED 에 걸렸고, 화면 문구 사전은
+   * '좌석' 이라는 낱말이 수백 번 나와 기록을 통째로 밀어냈다. */
+  var NOISE = /(analytics|googletagmanager|doubleclick|\/collect\?|languageInfo|loading_)/i;
+  var SEATY = /"(seatCount|cabinSeatCount|bookingClassSeatCount|remain\w*|avail\w*Seat\w*|numberOfSeats?|bookableSeats?)"\s*:/i;
 
   function note(kind, url, status, body) {
     try {
-      if (!WANTED.test(String(url))) return;
+      if (!WANTED.test(String(url)) || NOISE.test(String(url))) return;
       var text = String(body == null ? '' : body);
       if (text.length > CAP) text = text.slice(0, CAP) + '…(잘림)';
       hits.push({ at: Date.now(), kind: kind, url: String(url).slice(0, 300),
                   status: status, seaty: SEATY.test(text), body: text });
       if (hits.length > MAX) hits.shift();
+      stamp++;
     } catch (e) {}
   }
 
@@ -594,23 +621,190 @@ try {
     }
   } catch (e) {}
 
-  /** 사람이 읽을 한 줄 요약. 잔여석 필드를 가진 응답이 몇 건인지가 핵심이다. */
+  /* ---- 실측으로 확인된 응답 모양 (2026-08-27) --------------------------
+   *
+   * api/ap/booking/avail/awardAvailability 안:
+   *   commercialFareFamilyList: [
+   *     {fareFamily:"KEBONUSEY", seatCount:"9", soldout:false, totalMileage:"35000"},
+   *     {fareFamily:"KEBONUSPR", seatCount:"0", soldout:true,  totalMileage:"62500"}
+   *   ]
+   * KEBONUSPR 이 프레스티지다. 이게 매진 판정의 출처다 - 화면에는 없다.
+   *
+   * seatCount "9" 는 실제 9석이 아니라 "9석 이상" 이라는 항공사 표준 상한값이다.
+   * 반대로 "0" 은 진짜 0이다. 우리가 알고 싶은 것은 09:00 직후에 1~2였다가 0이
+   * 되는지(누가 채간 것), 아니면 처음부터 0인지(그날 그 등급이 아예 없던 것)다.
+   * 둘은 대응이 전혀 다르다. */
+  var FAMILY = { KEBONUSPR: '프레스티지', KEBONUSEY: '일반석',
+                 KEBONUSPE: '프리미엄', KEBONUSFR: '일등석' };
+
+  /** 기록에서 등급별 좌석 수 변화를 뽑아낸다. [{at, family, seatCount, soldout}] */
+  function seatTimeline() {
+    var out = [];
+    hits.forEach(function (h) {
+      var d;
+      try { d = JSON.parse(h.body); } catch (e) { return; }
+      var bounds = (d && d.upsellBoundAvailList) || [];
+      bounds.forEach(function (b) {
+        ((b && b.availFlightList) || []).forEach(function (f) {
+          ((f && f.commercialFareFamilyList) || []).forEach(function (c) {
+            out.push({
+              at: h.at,
+              flight: (f.flightInfoList && f.flightInfoList[0]
+                       && (f.flightInfoList[0].carrierCode + f.flightInfoList[0].flightNumber)) || '',
+              date: String(f.departureDate || '').slice(0, 8),
+              family: c.fareFamily || '',
+              name: FAMILY[c.fareFamily] || c.fareFamily || '',
+              seatCount: c.seatCount,
+              soldout: !!c.soldout,
+              mileage: c.totalMileage
+            });
+          });
+        });
+      });
+    });
+    return out;
+  }
+
+  /** 지금 조회 화면이 어느 날을 보고 있는가. "MM-DD" 또는 null.
+   *
+   * 조회 페이지 주소에는 날짜가 없다(/departure 뿐). 그래서 화면만 보고는 지금
+   * 몇 일자를 조회 중인지 확신할 수 없는데, 서버 응답에는 있다. 달력을 건너뛰고
+   * 이 페이지에서 시작할 때 "엉뚱한 날 좌석을 누르는" 사고를 막는 유일한 근거다. */
+  function shownDate() {
+    var tl = seatTimeline();
+    for (var i = tl.length - 1; i >= 0; i--) {
+      var d = tl[i].date;                       // YYYYMMDD
+      if (d && d.length === 8) return d.slice(4, 6) + '-' + d.slice(6, 8);
+    }
+    return null;
+  }
+
+  /** 이 화면의 날짜 띠에 있는 날들. ["08-16", ...] - 목표 날짜가 여기 있어야 고를 수 있다. */
+  function stripDates() {
+    var out = [];
+    hits.forEach(function (h) {
+      var d;
+      try { d = JSON.parse(h.body); } catch (e) { return; }
+      ((d && d.upsellBoundAvailList) || []).forEach(function (b) {
+        ((b && b.upsellCalendarFareList) || []).forEach(function (c) {
+          var s2 = String(c.date || '');
+          if (s2.length !== 8) return;
+          var mmdd = s2.slice(4, 6) + '-' + s2.slice(6, 8);
+          if (out.indexOf(mmdd) < 0) out.push(mmdd);
+        });
+      });
+    });
+    return out;
+  }
+
+  /* 결제 수단은 화면에서 눈으로 찾을 필요가 없다. 서버가 목록으로 준다.
+   * 돌아오는 편에 네이버페이가 없다는 것도 여기서 미리 알 수 있다. */
+  function payTypes() {
+    for (var i = hits.length - 1; i >= 0; i--) {
+      if (!/GetAvailablePaymentType/i.test(hits[i].url)) continue;
+      try {
+        var d = JSON.parse(hits[i].body);
+        return (d.paymentTypeList || []).map(function (t) { return t.paymentTypeCode; });
+      } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  /* ---- 조회 조건이 어디에 사는가 -----------------------------------------
+   *
+   * 실측(2026-08-27): 조회 페이지 주소는 그냥 /booking/select-award-flight/departure
+   * 다. 물음표 뒤가 비어 있다. 그런데 이 화면은 노선·날짜·인원·등급을 알고 있고
+   * awardAvailability 를 그 조건으로 부른다. 그 조건이 주소가 아니라면 어딘가에는
+   * 있다 - sessionStorage, localStorage, 아니면 서버 세션이다.
+   *
+   * 앞의 둘이면 목표 날짜를 그 자리에 써넣고 조회 페이지로 바로 들어갈 수 있다.
+   * 서버 세션이면 못 한다. 추측하지 말고 실제로 무엇이 들어 있는지 본다.
+   *
+   * 값은 그대로 두고 읽기만 한다. 다만 사람 정보나 토큰이 섞여 있을 수 있으므로
+   * 내보낼 때는 날짜처럼 보이는 것만 남기고 나머지는 길이만 적는다. */
+  var DATEISH = /(20\d{2})[-.\/]?(\d{2})[-.\/]?(\d{2})/;
+
+  function scanStore(store, name) {
+    var out = [];
+    try {
+      for (var i = 0; i < store.length; i++) {
+        var k = store.key(i), v = '';
+        try { v = String(store.getItem(k)); } catch (e) { continue; }
+        if (k.indexOf('ke_award') === 0) continue;      // 우리 것은 뺀다
+        var m = v.match(DATEISH);
+        out.push({ store: name, key: k, len: v.length,
+                   date: m ? m[0] : '', sample: m ? v.slice(Math.max(0, m.index - 60),
+                                                             m.index + 60) : '' });
+      }
+    } catch (e) {}
+    return out;
+  }
+
+  /** 지금 화면의 저장소에서 '날짜를 들고 있는 항목' 을 찾는다. */
+  function storeHints() {
+    var all = [];
+    try { all = all.concat(scanStore(W.sessionStorage, 'session')); } catch (e) {}
+    try { all = all.concat(scanStore(W.localStorage, 'local')); } catch (e) {}
+    return all;
+  }
+
+  /** 사람이 읽을 한 줄 요약. 목표 등급이 몇 석인지가 핵심이다. */
   function summary() {
-    if (!hits.length) return '기록된 조회 응답 없음';
-    var seaty = hits.filter(function (h) { return h.seaty; }).length;
-    return hits.length + '건 기록 (좌석 수 필드 있음: ' + seaty + '건)';
+    if (!hits.length) return '조회 응답 기록 없음';
+    var tl = seatTimeline();
+    if (!tl.length) return hits.length + '건 기록 (좌석 수는 아직 못 봄)';
+    var last = {};
+    tl.forEach(function (r) { last[r.name] = r; });
+    return Object.keys(last).map(function (k) {
+      return k + ' ' + (last[k].soldout ? '매진' : last[k].seatCount + '석');
+    }).join(' · ');
   }
 
   W.KE_PROBE = {
     hits: function () { return hits; },
+    stamp: function () { return stamp; },
     summary: summary,
+    seatTimeline: seatTimeline,
+    storeHints: storeHints,
+    shownDate: shownDate, stripDates: stripDates,
+    payTypes: payTypes,
     dump: function () {
-      return hits.map(function (h) {
+      /* 원본 JSON 은 길어서 사람이 읽기 어렵다. 알고 싶은 것(등급별 좌석 수가
+       * 언제 어떻게 바뀌었나)을 맨 위에 표로 뽑아두고 원본은 그 아래 붙인다. */
+      var tl = seatTimeline();
+      var head = tl.length
+        ? ('== 등급별 좌석 수 ==' + '\n'
+           + tl.map(function (r) {
+               return new Date(r.at).toISOString().slice(11, 23) + '  ' + r.date + ' ' + r.flight
+                    + '  ' + (r.name || r.family) + '  ' + r.seatCount + '석'
+                    + (r.soldout ? ' (매진)' : '') + '  ' + r.mileage + '마일';
+             }).join('\n'))
+        : '== 등급별 좌석 수: 아직 못 봄 ==';
+      var pt = payTypes();
+      /* 달력 건너뛰기가 가능한지는 조회 조건이 어디 사는가에 달렸다.
+       * 저장소에 날짜가 있으면 고쳐 넣고 바로 들어갈 수 있고, 없으면 못 한다. */
+      var hints = storeHints();
+      var dated = hints.filter(function (h) { return h.date; });
+      head += '\n\n== 조회 조건이 어디 있나 (달력 건너뛰기용) ==\n'
+            + (hints.length
+               ? (dated.length
+                  ? dated.map(function (h) {
+                      return h.store + '  ' + h.key + '  (' + h.len + '자)  날짜=' + h.date
+                           + '\n    …' + h.sample.replace(/[\s]+/g, ' ') + '…';
+                    }).join('\n')
+                  : '저장소에 ' + hints.length + '개 있지만 날짜를 든 것은 없음'
+                    + ' -> 조회 조건은 서버 세션에 있을 가능성이 큼\n  ('
+                    + hints.map(function (h) { return h.key; }).slice(0, 30).join(', ') + ')')
+               : '저장소가 비어 있음 -> 조회 조건은 서버 세션에 있을 가능성이 큼');
+      head += '\n\n== 쓸 수 있는 결제 수단 ==\n'
+            + (pt ? pt.join(', ') + (pt.indexOf('NAVERPAY') < 0 ? '  <- 네이버페이 없음' : '')
+                  : '아직 못 봄');
+      return head + '\n\n== 원본 ==\n\n' + hits.map(function (h) {
         return '### ' + new Date(h.at).toISOString() + '  [' + h.kind + ' ' + h.status + ']'
              + (h.seaty ? '  <- 좌석 수 필드 있음' : '') + '\n' + h.url + '\n' + h.body;
       }).join('\n\n');
     },
-    clear: function () { hits = []; }
+    clear: function () { hits = []; stamp++; }
   };
   if (W !== window) { try { window.KE_PROBE = W.KE_PROBE; } catch (e) {} }
 })();
@@ -805,12 +999,37 @@ try {
   }
   /* 단계가 넘어갈 때마다 얼마나 걸렸는지 남긴다.
    * "30초 걸리는데 줄일 수 있나" 는 어디서 쓰는지 알아야 답할 수 있다. */
+  /* 한 단계가 오래 걸렸을 때 "페이지가 느린 것" 과 "우리가 헛기다린 것" 은 대응이
+   * 정반대다. 실측에서 8단계(동의)가 6.9초였는데 어느 쪽인지 구분할 수가 없었다.
+   * 매 tick 마다 지금 무엇 때문에 못 누르는지를 적어 시간을 나눠 담는다.
+   *
+   * 화면 안정 = 앞 단계 클릭 뒤 화면이 잠잠해지기를 기다림 (settleMs/maxSettleMs)
+   * 요소 없음 = 누를 것이 아직 화면에 안 나타남 (페이지가 느린 쪽)
+   * 가림     = 나타났지만 무언가에 덮여 있음 */
+  var phaseMs = {}, lastTickAt = 0;
+  function phase(name, now) {
+    /* 탭이 숨겨져 타이머가 늦춰지면 한 tick 이 몇 초로 벌어진다. 그걸 그대로 담으면
+     * 원인 분석이 아니라 스로틀링 측정이 된다. 한 tick 몫만 담는다. */
+    var d = lastTickAt ? now - lastTickAt : 0;
+    if (d > 0 && d < 1000) phaseMs[name] = (phaseMs[name] || 0) + d;
+    lastTickAt = now;
+  }
+
   function markStep(n, label) {
     var t = Date.now();
     if (S.stepStartedAt) {
       if (!S.times) S.times = [];
-      S.times.push({ n: n, label: String(label || '').slice(0, 22), ms: t - S.stepStartedAt });
+      var why = Object.keys(phaseMs)
+        .filter(function (k) { return phaseMs[k] >= 250; })
+        .sort(function (a, b) { return phaseMs[b] - phaseMs[a]; })
+        .map(function (k) { return k + ' ' + (phaseMs[k] / 1000).toFixed(1) + 's'; });
+      S.times.push({ n: n, label: String(label || '').slice(0, 22),
+                     ms: t - S.stepStartedAt, why: why.join(', ') });
     }
+    /* 다음 단계는 기준점을 새로 잡는다. 안 그러면 직전 단계의 마지막 tick 부터
+     * 흐른 시간이 새 단계 몫으로 넘어온다. */
+    phaseMs = {};
+    lastTickAt = 0;
     S.stepStartedAt = t;
   }
 
@@ -819,7 +1038,8 @@ try {
     if (!a.length) return '';
     a.sort(function (x, y) { return y.ms - x.ms; });
     return '  느린 단계: ' + a.slice(0, 3).map(function (x) {
-      return x.n + '.' + x.label + ' ' + (x.ms / 1000).toFixed(1) + 's';
+      return x.n + '.' + x.label + ' ' + (x.ms / 1000).toFixed(1) + 's'
+           + (x.why ? ' (' + x.why + ')' : '');
     }).join(', ');
   }
 
@@ -1092,7 +1312,7 @@ try {
      * 기다린다. 계속 바뀌기만 하는 화면도 있으므로 상한을 둔다. */
     if (S.idx > 0 && lastClickAt) {
       var quiet = now - Math.max(lastMutAt, lastClickAt);
-      if (quiet < S.settleMs && now - lastClickAt < S.maxSettleMs) return;
+      if (quiet < S.settleMs && now - lastClickAt < S.maxSettleMs) { phase('화면 안정', now); return; }
     }
 
     /* ensure 단계: "지금 값이 want 면 그대로 두고, 아니면 골라서 맞춘다".
@@ -1324,6 +1544,7 @@ try {
     S.times = []; S.stepStartedAt = Date.now();
     }
     if (!el) {
+      phase(blockedEl ? '가림' : '요소 없음', now);
       if (!waitingSince) waitingSince = now;
       /* optional: 이 화면에 아예 없을 수 있는 단계. 기다려보고 없으면 조용히 넘어간다. */
       if (step.optional && !blockedEl && now - waitingSince > (S.optionalMs || 400)) {
@@ -1885,25 +2106,66 @@ try {
    * 두고 그것을 다시 쓴다. 목표 날짜가 그때와 다르면 '가는 날' 자리만 고친다 -
    * 왕복이면 오는 날도 주소에 들어 있어서 아무거나 바꾸면 안 된다. */
 
-  /** 지금 바로 시작이 가능한가. {url, from, why} */
+  /** 지금 바로 시작이 가능한가. {inPlace|url, from, why}
+   *
+   * 원래는 조회 주소에 날짜를 박아 밖에서 뛰어들려고 했는데, 그 주소는
+   * /booking/select-award-flight/departure 뿐이고 물음표 뒤가 비어 있다. 게다가
+   * 응답에 jsessionId 와 pageTicket 이 있다 - 서버가 흐름 순서를 강제한다는 뜻이라,
+   * 중간 페이지로 뛰어드는 것 자체를 막는다.
+   *
+   * 대신 이미 그 페이지에 서 있다가 그 자리에서 새로고침한다. 세션 안에 있으므로
+   * 티켓도 그대로고, 주소에 날짜가 없어도 상관없다. 조회 페이지는 자기 화면에
+   * 7일치 날짜 띠를 들고 있어서 새로 열린 날도 거기 있다. */
   function skipPlan(R) {
     var U2 = W.KE_UTIL || window.KE_UTIL;
+    var P = W.KE_PROBE || window.KE_PROBE;
     if (!R || !U2) return { why: '준비 안 됨' };
     var st = R.state;
-    if (!st.deepLink) return { why: '아직 저장된 조회 주소가 없습니다 - 한 번 끝까지 돌리면 저장됩니다' };
-    if (!st.expectDate) return { why: '목표 날짜를 넣어야 합니다 (건너뛰면 화면에서 날짜를 확인할 수 없습니다)' };
+    if (!st.expectDate) {
+      return { why: '목표 날짜를 넣어야 합니다 (달력을 건너뛰면 날짜를 확인할 수 없습니다)' };
+    }
     var from = R.departureStep();
     if (from < 0) return { why: '조회 페이지에서 시작하는 단계가 없습니다' };
-    var r = U2.retarget(st.deepLink, st.deepLinkDate, st.expectDate);
-    if (!r.url) return { why: r.why };
-    return { url: r.url, from: from, why: '' };
+    if (!U2.onDeparture()) {
+      return { why: '지금 조회 페이지가 아닙니다 - 조회 화면을 띄워두고 대기하세요' };
+    }
+    /* 이 화면이 어느 날을 조회 중인가. 근거가 둘이다:
+     *   - 검색 위젯의 날짜 입력칸 (좌석이 없어도 있다)
+     *   - 서버 응답의 departureDate (좌석이 있을 때만 나온다)
+     * 09:00 직전에 목표 날짜로 맞춰두고 기다리는 상황에서는 좌석이 아직 없으므로
+     * 앞의 것만 있다. 둘 다 있는데 서로 다르면 화면을 못 믿는다는 뜻이니 멈춘다. */
+    var byApi = (P && P.shownDate && P.shownDate()) || null;
+    var byUi = U2.searchedDate();
+    if (byApi && byUi && byApi !== byUi) {
+      return { why: '화면(' + byUi + ')과 서버 응답(' + byApi + ')의 날짜가 다릅니다'
+                    + ' - 화면이 낡았을 수 있어 건너뛰지 않습니다' };
+    }
+    var seen = byUi || byApi;
+    if (!seen) return { why: '이 화면이 어느 날짜인지 아직 확인되지 않았습니다' };
+
+    /* 띠에 있어도 지금 보고 있는 날이 아니면 눌러서 바꿔야 하는데, 그 날짜 띠를
+     * 누르는 단계가 아직 없다. 그대로 진행하면 엉뚱한 날 좌석을 누른다.
+     * 3초 벌자고 낼 값이 아니므로, 그 단계가 생기기 전까지는 달력으로 간다. */
+    /* 날짜가 다르면 눌러서 바꿔야 하는데, 그 단계가 없다. 그대로 진행하면 엉뚱한
+     * 날 좌석을 누른다 - 3초 벌자고 낼 값이 아니다.
+     *
+     * 애초에 바꿀 일을 만들지 않는 것이 낫다: 09:00 전에 조회 화면을 목표 날짜로
+     * 맞춰두면 된다. 그날 좌석이 아직 없어 "결과 없음" 이 뜨지만, 검색 조건은
+     * 서버 세션에 남으므로 09:00 에 새로고침하면 그 날짜로 다시 조회된다. */
+    if (seen !== st.expectDate) {
+      return { why: '이 화면은 ' + seen + ' 인데 목표는 ' + st.expectDate + ' 입니다'
+                    + ' - 조회 화면을 ' + st.expectDate + ' 로 맞춰두고 대기하세요'
+                    + ' (좌석이 없어도 됩니다)' };
+    }
+    return { inPlace: true, from: from, seen: seen, why: '' };
   }
 
   function skipStatus(R) {
     if (!S.skipCalendar) return '';
     var p = skipPlan(R);
-    return p.url ? ('바로 시작 준비됨 - ' + R.state.expectDate + ' 로 ' + (p.from + 1) + '단계부터')
-                 : ('바로 시작 불가: ' + p.why + ' - 달력부터 진행합니다');
+    if (!p.inPlace) return '바로 시작 불가: ' + p.why + ' - 달력부터 진행합니다';
+    return '바로 시작 준비됨 - 이 화면(' + p.seen + ')에서 새로고침, '
+         + (p.from + 1) + '단계부터';
   }
 
   function fire(reason) {
@@ -1926,14 +2188,15 @@ try {
     /* 달력 건너뛰기가 켜져 있고 조건이 맞으면 새로고침 대신 조회 페이지로 바로 간다.
      * 조건이 안 맞으면 이유를 알리고 원래대로 달력부터 - 조용히 건너뛰지 않는다. */
     var plan = S.skipCalendar ? skipPlan(R) : { why: '' };
-    if (!R.armForReload(plan.url ? plan.from : 0)) return false;
+    if (!R.armForReload(plan.inPlace ? plan.from : 0)) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
     keepAwake(false);
     save();
-    if (plan.url) {
-      toast('발사 (' + reason + ') - 달력 건너뛰고 조회 페이지로 @ ' + fmtKst(nowSrv()));
-      setTimeout(function () { location.href = plan.url; }, 0);
+    if (plan.inPlace) {
+      /* 같은 주소로 새로고침한다. 페이지 한 장(달력)과 그에 딸린 전환이 통째로 빠진다. */
+      toast('발사 (' + reason + ') - 조회 화면에서 그대로 새로고침 @ ' + fmtKst(nowSrv()));
+      setTimeout(function () { location.reload(); }, 0);
       return true;
     }
     if (S.skipCalendar) toast('바로 시작 불가(' + plan.why + ') - 달력부터 진행합니다', true);
@@ -2007,8 +2270,15 @@ try {
   }
   function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
 
+  var seenStamp = -1;
   function tick() {
     if (!clockEl) return;
+    /* '바로 시작' 안내와 좌석 수는 서버 응답에서 온다. 응답은 우리가 그린 뒤에
+     * 도착하므로, 새 기록이 생겼을 때 다시 그려야 화면이 사실과 맞는다. */
+    try {
+      var P = W.KE_PROBE || window.KE_PROBE;
+      if (P && P.stamp() !== seenStamp) { seenStamp = P.stamp(); renderRec(); }
+    } catch (e) {}
     var n = nowSrv();
     clockEl.textContent = fmtKst(n) + '  (' + syncQuality + ')';
     var T = targetMs();
@@ -2120,7 +2390,13 @@ try {
      * 남아, 안 되는 줄 알고 있다가 정작 되거나 그 반대가 된다. */
     var pr = root.querySelector('#ke-probe');
     var P = W.KE_PROBE || window.KE_PROBE;
-    if (pr && P) pr.textContent = P.summary();
+    if (pr && P) {
+      var txt = P.summary();
+      pr.textContent = txt;
+      /* 매진은 조용히 지나가면 안 된다. 그 등급이 애초에 0석이었는지 누가 채간
+       * 것인지는 기록으로 따지되, 지금 0이라는 사실은 바로 보여야 한다. */
+      pr.style.color = /매진/.test(txt) ? '#c00' : '#888';
+    }
     var why = root.querySelector('#ke-skipcal-why');
     if (why) why.textContent = skipStatus(R);
     if (lab) {
@@ -2457,6 +2733,7 @@ try {
   }, true);
 
   expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount, save: save, schedule: schedule,
+    render: renderRec,
                      targetMs: targetMs,
                      rehearse: rehearse,
                      offset: function () { return offsetMs; } });

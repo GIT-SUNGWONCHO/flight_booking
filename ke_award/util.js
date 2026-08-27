@@ -394,6 +394,27 @@
     return n;
   }
 
+  /** 조회 화면이 "어느 날을 조회 중인지". "MM-DD" 또는 null.
+   *
+   * 주소에는 날짜가 없고(/departure 뿐), 서버 응답의 departureDate 는 좌석이 있을
+   * 때만 나온다. 그런데 우리가 정작 알아야 하는 순간은 좌석이 아직 없을 때다 -
+   * 09:00 직전에 목표 날짜로 맞춰두고 기다리는 상황이 그것이다.
+   *
+   * 그때 남는 근거는 검색 위젯의 날짜 입력칸뿐이다(실측 라벨: "08월 21일 (토)").
+   * 왕복이면 가는 날/오는 날 둘이 있으므로 첫 번째를 쓴다. */
+  var DATEINPUT = 'kds-dateinput, [class*="ui-dateinput__host"], [class*="-dateinput"]';
+
+  function searchedDate() {
+    var els;
+    try { els = document.querySelectorAll(DATEINPUT); } catch (e) { return null; }
+    for (var i = 0; i < els.length; i++) {
+      if (!visible(els[i])) continue;
+      var md = monthDay(label(els[i]));
+      if (md) return md;
+    }
+    return null;
+  }
+
   // ---- 달력 건너뛰기(바로 시작) ------------------------------------------
   /* 실측 27.7초 중 절반 이상이 대한항공 페이지가 그려지기를 기다린 시간이다.
    * 우리 폴링을 조여봐야 몇 밀리초다. 남은 방법은 페이지를 덜 거치는 것 하나뿐이라,
@@ -466,7 +487,7 @@
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
-    onDeparture: onDeparture, urlDates: urlDates, retarget: retarget,
+    onDeparture: onDeparture, searchedDate: searchedDate, urlDates: urlDates, retarget: retarget,
     nextYearFor: nextYearFor,
     alreadyOn: alreadyOn
   };

@@ -1,13 +1,42 @@
 <!doctype html><meta charset="utf-8"><title>조회 (픽스처)</title>
 <h1>항공편 조회</h1>
+<!-- 실측 구조: 검색 위젯의 날짜 입력칸. 좌석이 하나도 없을 때도 이건 남아 있어서
+     "이 화면이 몇 일자를 조회 중인가" 를 알 수 있는 유일한 근거가 된다. -->
+<div id="ang-flight-widget-detail">
+  <div class="ang-flight-widget__item -dateinput">
+    <kds-dateinput class="ang-dateinput">
+      <kds-dateinput_1 class="--wds-ui ui-dateinput__host" id="depdate"></kds-dateinput_1>
+    </kds-dateinput>
+  </div>
+  <div class="ang-flight-widget__item -dateinput">
+    <kds-dateinput class="ang-dateinput">
+      <kds-dateinput_1 class="--wds-ui ui-dateinput__host" id="retdate"></kds-dateinput_1>
+    </kds-dateinput>
+  </div>
+</div>
 <div id="shown"></div>
 <button id="seat">프레스티지 PR 1석 · KE927 ICN→FCO</button>
 <button id="next">다음</button>
 <script>
+(function () {
   window.__clicks = [];
+  window.__loads = (+sessionStorage.getItem('loads') || 0) + 1;
+  sessionStorage.setItem('loads', window.__loads);
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[id]'); if (t) window.__clicks.push(t.id);
   }, true);
   var m = /depDate=(\d{8})/.exec(location.search);
-  document.getElementById('shown').textContent = m ? ('가는 날 ' + m[1]) : '날짜 없음';
+  var day = m ? m[1] : '20270821';
+  document.getElementById('shown').textContent = '가는 날 ' + day;
+  document.getElementById('depdate').textContent =
+    day.slice(4, 6) + '월 ' + day.slice(6, 8) + '일 (토)';
+  document.getElementById('retdate').textContent = '09월 05일 (일)';
+  // empty=1: 아직 안 열린 날짜를 조회한 상태 - 좌석이 없어 API 에 날짜가 안 나온다
+  if (location.search.indexOf('empty=1') >= 0) return;
+  /* 실제 화면과 같이, 날짜와 좌석 수는 화면이 아니라 이 응답에서 온다.
+     probe 가 이걸 읽어 "지금 어느 날을 보고 있나" 를 판정한다. */
+  var x = new XMLHttpRequest();
+  x.open("GET", "/booking/select-award-flight/awardAvailability.json?d=" + day);
+  x.send();
+})();
 </script>

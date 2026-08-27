@@ -187,25 +187,66 @@
    * 두고 그것을 다시 쓴다. 목표 날짜가 그때와 다르면 '가는 날' 자리만 고친다 -
    * 왕복이면 오는 날도 주소에 들어 있어서 아무거나 바꾸면 안 된다. */
 
-  /** 지금 바로 시작이 가능한가. {url, from, why} */
+  /** 지금 바로 시작이 가능한가. {inPlace|url, from, why}
+   *
+   * 원래는 조회 주소에 날짜를 박아 밖에서 뛰어들려고 했는데, 그 주소는
+   * /booking/select-award-flight/departure 뿐이고 물음표 뒤가 비어 있다. 게다가
+   * 응답에 jsessionId 와 pageTicket 이 있다 - 서버가 흐름 순서를 강제한다는 뜻이라,
+   * 중간 페이지로 뛰어드는 것 자체를 막는다.
+   *
+   * 대신 이미 그 페이지에 서 있다가 그 자리에서 새로고침한다. 세션 안에 있으므로
+   * 티켓도 그대로고, 주소에 날짜가 없어도 상관없다. 조회 페이지는 자기 화면에
+   * 7일치 날짜 띠를 들고 있어서 새로 열린 날도 거기 있다. */
   function skipPlan(R) {
     var U2 = W.KE_UTIL || window.KE_UTIL;
+    var P = W.KE_PROBE || window.KE_PROBE;
     if (!R || !U2) return { why: '준비 안 됨' };
     var st = R.state;
-    if (!st.deepLink) return { why: '아직 저장된 조회 주소가 없습니다 - 한 번 끝까지 돌리면 저장됩니다' };
-    if (!st.expectDate) return { why: '목표 날짜를 넣어야 합니다 (건너뛰면 화면에서 날짜를 확인할 수 없습니다)' };
+    if (!st.expectDate) {
+      return { why: '목표 날짜를 넣어야 합니다 (달력을 건너뛰면 날짜를 확인할 수 없습니다)' };
+    }
     var from = R.departureStep();
     if (from < 0) return { why: '조회 페이지에서 시작하는 단계가 없습니다' };
-    var r = U2.retarget(st.deepLink, st.deepLinkDate, st.expectDate);
-    if (!r.url) return { why: r.why };
-    return { url: r.url, from: from, why: '' };
+    if (!U2.onDeparture()) {
+      return { why: '지금 조회 페이지가 아닙니다 - 조회 화면을 띄워두고 대기하세요' };
+    }
+    /* 이 화면이 어느 날을 조회 중인가. 근거가 둘이다:
+     *   - 검색 위젯의 날짜 입력칸 (좌석이 없어도 있다)
+     *   - 서버 응답의 departureDate (좌석이 있을 때만 나온다)
+     * 09:00 직전에 목표 날짜로 맞춰두고 기다리는 상황에서는 좌석이 아직 없으므로
+     * 앞의 것만 있다. 둘 다 있는데 서로 다르면 화면을 못 믿는다는 뜻이니 멈춘다. */
+    var byApi = (P && P.shownDate && P.shownDate()) || null;
+    var byUi = U2.searchedDate();
+    if (byApi && byUi && byApi !== byUi) {
+      return { why: '화면(' + byUi + ')과 서버 응답(' + byApi + ')의 날짜가 다릅니다'
+                    + ' - 화면이 낡았을 수 있어 건너뛰지 않습니다' };
+    }
+    var seen = byUi || byApi;
+    if (!seen) return { why: '이 화면이 어느 날짜인지 아직 확인되지 않았습니다' };
+
+    /* 띠에 있어도 지금 보고 있는 날이 아니면 눌러서 바꿔야 하는데, 그 날짜 띠를
+     * 누르는 단계가 아직 없다. 그대로 진행하면 엉뚱한 날 좌석을 누른다.
+     * 3초 벌자고 낼 값이 아니므로, 그 단계가 생기기 전까지는 달력으로 간다. */
+    /* 날짜가 다르면 눌러서 바꿔야 하는데, 그 단계가 없다. 그대로 진행하면 엉뚱한
+     * 날 좌석을 누른다 - 3초 벌자고 낼 값이 아니다.
+     *
+     * 애초에 바꿀 일을 만들지 않는 것이 낫다: 09:00 전에 조회 화면을 목표 날짜로
+     * 맞춰두면 된다. 그날 좌석이 아직 없어 "결과 없음" 이 뜨지만, 검색 조건은
+     * 서버 세션에 남으므로 09:00 에 새로고침하면 그 날짜로 다시 조회된다. */
+    if (seen !== st.expectDate) {
+      return { why: '이 화면은 ' + seen + ' 인데 목표는 ' + st.expectDate + ' 입니다'
+                    + ' - 조회 화면을 ' + st.expectDate + ' 로 맞춰두고 대기하세요'
+                    + ' (좌석이 없어도 됩니다)' };
+    }
+    return { inPlace: true, from: from, seen: seen, why: '' };
   }
 
   function skipStatus(R) {
     if (!S.skipCalendar) return '';
     var p = skipPlan(R);
-    return p.url ? ('바로 시작 준비됨 - ' + R.state.expectDate + ' 로 ' + (p.from + 1) + '단계부터')
-                 : ('바로 시작 불가: ' + p.why + ' - 달력부터 진행합니다');
+    if (!p.inPlace) return '바로 시작 불가: ' + p.why + ' - 달력부터 진행합니다';
+    return '바로 시작 준비됨 - 이 화면(' + p.seen + ')에서 새로고침, '
+         + (p.from + 1) + '단계부터';
   }
 
   function fire(reason) {
@@ -228,14 +269,15 @@
     /* 달력 건너뛰기가 켜져 있고 조건이 맞으면 새로고침 대신 조회 페이지로 바로 간다.
      * 조건이 안 맞으면 이유를 알리고 원래대로 달력부터 - 조용히 건너뛰지 않는다. */
     var plan = S.skipCalendar ? skipPlan(R) : { why: '' };
-    if (!R.armForReload(plan.url ? plan.from : 0)) return false;
+    if (!R.armForReload(plan.inPlace ? plan.from : 0)) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
     keepAwake(false);
     save();
-    if (plan.url) {
-      toast('발사 (' + reason + ') - 달력 건너뛰고 조회 페이지로 @ ' + fmtKst(nowSrv()));
-      setTimeout(function () { location.href = plan.url; }, 0);
+    if (plan.inPlace) {
+      /* 같은 주소로 새로고침한다. 페이지 한 장(달력)과 그에 딸린 전환이 통째로 빠진다. */
+      toast('발사 (' + reason + ') - 조회 화면에서 그대로 새로고침 @ ' + fmtKst(nowSrv()));
+      setTimeout(function () { location.reload(); }, 0);
       return true;
     }
     if (S.skipCalendar) toast('바로 시작 불가(' + plan.why + ') - 달력부터 진행합니다', true);
@@ -309,8 +351,15 @@
   }
   function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
 
+  var seenStamp = -1;
   function tick() {
     if (!clockEl) return;
+    /* '바로 시작' 안내와 좌석 수는 서버 응답에서 온다. 응답은 우리가 그린 뒤에
+     * 도착하므로, 새 기록이 생겼을 때 다시 그려야 화면이 사실과 맞는다. */
+    try {
+      var P = W.KE_PROBE || window.KE_PROBE;
+      if (P && P.stamp() !== seenStamp) { seenStamp = P.stamp(); renderRec(); }
+    } catch (e) {}
     var n = nowSrv();
     clockEl.textContent = fmtKst(n) + '  (' + syncQuality + ')';
     var T = targetMs();
@@ -422,7 +471,13 @@
      * 남아, 안 되는 줄 알고 있다가 정작 되거나 그 반대가 된다. */
     var pr = root.querySelector('#ke-probe');
     var P = W.KE_PROBE || window.KE_PROBE;
-    if (pr && P) pr.textContent = P.summary();
+    if (pr && P) {
+      var txt = P.summary();
+      pr.textContent = txt;
+      /* 매진은 조용히 지나가면 안 된다. 그 등급이 애초에 0석이었는지 누가 채간
+       * 것인지는 기록으로 따지되, 지금 0이라는 사실은 바로 보여야 한다. */
+      pr.style.color = /매진/.test(txt) ? '#c00' : '#888';
+    }
     var why = root.querySelector('#ke-skipcal-why');
     if (why) why.textContent = skipStatus(R);
     if (lab) {
@@ -759,6 +814,7 @@
   }, true);
 
   expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount, save: save, schedule: schedule,
+    render: renderRec,
                      targetMs: targetMs,
                      rehearse: rehearse,
                      offset: function () { return offsetMs; } });

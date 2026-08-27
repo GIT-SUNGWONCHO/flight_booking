@@ -12,7 +12,7 @@
   // 검색을 누르면 조회 페이지로 넘어간다 - 실제 사이트와 같은 모양으로.
   document.getElementById('search').addEventListener('click', function () {
     var d = (window.__clicks.find(function (x) { return x.indexOf('dep-fare-') === 0; }) || '').slice(9);
-    location.href = 'select-award-flight/departure.html'
+    location.href = '/booking/select-award-flight/departure'
       + '?tripType=RT&depDate=202708' + (d || '21') + '&retDate=20270905&cabin=PR';
   });
 </script>

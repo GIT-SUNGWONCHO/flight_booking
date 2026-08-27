@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8"><title>느린 단계 (픽스처)</title>
+<h1>단계가 왜 느린지 나누어 재기</h1>
+<button id="a">확인</button>
+<div id="late"></div>
+<script>
+  // 실제 화면 흉내: [확인] 을 누르면 다음 버튼이 한참 뒤에야 나타난다.
+  // 이 경우 시간은 '요소 없음' - 페이지가 느린 것이지 우리가 헛기다린 게 아니다.
+  var LATE = +(new URLSearchParams(location.search).get('late') || 1500);
+  var CHURN = location.search.indexOf('churn') >= 0;
+  document.getElementById('a').addEventListener('click', function () {
+    setTimeout(function () {
+      var b = document.createElement('button');
+      b.id = 'b'; b.textContent = '동의';
+      document.getElementById('late').appendChild(b);
+    }, LATE);
+    // churn: 버튼은 곧바로 있는데 화면이 계속 바뀐다 -> 시간은 '화면 안정' 으로 가야 한다
+    if (CHURN) {
+      var b = document.createElement('button');
+      b.id = 'b'; b.textContent = '동의';
+      document.getElementById('late').appendChild(b);
+      var n = 0, t = setInterval(function () {
+        var d = document.createElement('span'); d.textContent = '.';
+        document.body.appendChild(d);
+        if (++n > 40) clearInterval(t);
+      }, 50);
+    }
+  });
+</script>

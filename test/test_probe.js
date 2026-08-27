@@ -16,6 +16,24 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 global.window = global;
 
+// 저장소 흉내. probe 가 '조회 조건이 어디 사는가' 를 훑을 때 쓴다.
+function fakeStore(obj) {
+  const d = { ...obj };
+  return {
+    get length() { return Object.keys(d).length; },
+    key(i) { return Object.keys(d)[i]; },
+    getItem(k) { return d[k]; },
+    setItem(k, v) { d[k] = v; },
+  };
+}
+global.sessionStorage = fakeStore({
+  // 실측: 조회 페이지 주소에는 날짜가 없다(/departure 뿐). 그래서 조건이 어디
+  // 사는지가 달력 건너뛰기의 성립 여부를 가른다.
+  'booking.cond': '{"dep":"ICN","arr":"FCO","departureDate":"20270821"}',
+  'theme': 'light',
+});
+global.localStorage = fakeStore({ 'ke_award_steps_v1': '{"steps":[]}' });
+
 // 가짜 fetch/XHR 을 먼저 깔아두고 probe 가 그것을 감싸게 한다
 const served = new Map();
 global.fetch = function (url) {
@@ -62,12 +80,67 @@ served.set(LOGIN, JSON.stringify({ token: 'SECRET-DO-NOT-KEEP', name: 'CHO' }));
         '로그인 응답 같은 것은 남기지 않는다');
   check(hits[0] && hits[0].seaty === true,
         '잔여석 필드가 있는 응답을 표시한다 (매진 판정의 출처 후보)');
-  check(P.summary().includes('좌석 수 필드 있음: 1건'), '요약이 그 사실을 알려준다',
-        P.summary());
+  // 모양이 다른 응답은 '못 봤다' 고 말해야 한다. 아는 척하면 매진을 못 본 채로 지나간다.
+  check(P.summary().includes('아직 못 봄'),
+        '해석하지 못한 모양은 아는 척하지 않는다', P.summary());
   check(P.dump().includes('remainingSeats'), '내보내면 실제 값이 보인다');
 
   P.clear();
   check(P.hits().length === 0, '지울 수 있다');
+
+  // ---- 실측 응답으로 판정 필드를 읽어낸다 (2026-08-27 캡처) ----
+  const REAL_AVAIL = 'https://www.koreanair.com/api/ap/booking/avail/awardAvailability';
+  const REAL_PAY = 'https://www.koreanair.com/api/pp/payment/GetAvailablePaymentType';
+  served.set(REAL_AVAIL, fs.readFileSync(path.join(ROOT, 'test/fixture/api/awardAvailability.json'), 'utf8'));
+  served.set(REAL_PAY, fs.readFileSync(path.join(ROOT, 'test/fixture/api/paymentType.json'), 'utf8'));
+  await global.fetch(REAL_AVAIL);
+  await global.fetch(REAL_PAY);
+  await new Promise((r) => setTimeout(r, 30));
+
+  const tl = P.seatTimeline();
+  const pr = tl.find((r) => r.family === 'KEBONUSPR');
+  const ey = tl.find((r) => r.family === 'KEBONUSEY');
+  check(!!pr && !!ey, `등급 둘을 읽는다 (실제 ${tl.length}건)`);
+  check(pr && pr.name === '프레스티지', 'KEBONUSPR 이 프레스티지다', pr && pr.name);
+  check(pr && pr.seatCount === '0' && pr.soldout === true,
+        '프레스티지 매진을 그대로 읽는다', JSON.stringify(pr));
+  check(ey && ey.seatCount === '9' && ey.soldout === false,
+        '일반석 9석을 그대로 읽는다', JSON.stringify(ey));
+  check(pr && pr.flight === 'KE931' && pr.date === '20270821',
+        '어느 편 어느 날인지 함께 남긴다', JSON.stringify(pr && [pr.flight, pr.date]));
+  check(P.summary().includes('프레스티지 매진') && P.summary().includes('일반석 9석'),
+        '요약 한 줄로 등급별 상태를 보여준다', P.summary());
+  check(P.dump().startsWith('== 등급별 좌석 수 =='),
+        '내보내기 맨 위에 표가 먼저 온다', P.dump().slice(0, 40));
+
+  const pt = P.payTypes();
+  check(Array.isArray(pt) && pt.includes('NAVERPAY'),
+        '쓸 수 있는 결제 수단을 목록으로 읽는다 (네이버페이 있음)', JSON.stringify(pt));
+  check(P.dump().includes('== 쓸 수 있는 결제 수단 =='), '내보내기에 결제 수단도 나온다');
+
+  // 노이즈: 구글 애널리틱스는 현재 주소를 파라미터로 실어보내 'award' 가 걸린다
+  P.clear();
+  const GA = 'https://analytics.google.com/g/collect?v=2&dl=' +
+             encodeURIComponent('https://www.koreanair.com/booking/select-award-flight/departure');
+  served.set(GA, 'GIF89a');
+  await global.fetch(GA);
+  await new Promise((r) => setTimeout(r, 30));
+  check(P.hits().length === 0,
+        '애널리틱스는 주소에 award 가 들어 있어도 기록하지 않는다',
+        JSON.stringify(P.hits().map((h) => h.url)));
+
+  // ---- 조회 조건이 저장소에 있는가 (달력 건너뛰기의 성립 조건) ----
+  const hints = P.storeHints();
+  const dated = hints.filter((h) => h.date);
+  check(dated.length === 1 && dated[0].key === 'booking.cond',
+        '저장소에서 날짜를 든 항목을 찾아낸다', JSON.stringify(hints));
+  check(dated[0] && dated[0].date === '20270821', '그 날짜를 그대로 읽는다',
+        dated[0] && dated[0].date);
+  check(!hints.some((h) => h.key.indexOf('ke_award') === 0),
+        '우리가 쓴 항목은 결과에 넣지 않는다');
+  check(!P.dump().includes('"steps"'),
+        '날짜 없는 항목의 내용은 내보내지 않는다 (키 이름과 길이만)');
+  check(P.dump().includes('== 조회 조건이 어디 있나'), '내보내기에 그 결과가 들어간다');
 
   console.log();
   console.log(fails.length ? 'FAILED: ' + fails.join(', ') : '조회 응답 계측 테스트 통과');

@@ -87,7 +87,11 @@ def launch_with_retry(pw, attempts: int = 5, **kwargs):
             return pw.chromium.launch_persistent_context(**kwargs)
         except Exception as exc:
             msg = str(exc)
-            if not any(k in msg for k in ("EBUSY", "ETXTBSY", "Timeout")):
+            # "Target page, context or browser has been closed" 도 같은 증상이다.
+            # 잠긴 프로필을 붙잡은 크롬이 기동 도중 죽으면 이 문구로 나온다.
+            # 실측(2026-08-27)에서 이것 때문에 스위트가 통째로 EXIT=1 로 끝났다.
+            if not any(k in msg for k in ("EBUSY", "ETXTBSY", "Timeout",
+                                          "has been closed", "Target closed")):
                 raise
             last = exc
             delay = 0.5 * (i + 1)

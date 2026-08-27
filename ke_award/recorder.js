@@ -166,12 +166,37 @@
   }
   /* 단계가 넘어갈 때마다 얼마나 걸렸는지 남긴다.
    * "30초 걸리는데 줄일 수 있나" 는 어디서 쓰는지 알아야 답할 수 있다. */
+  /* 한 단계가 오래 걸렸을 때 "페이지가 느린 것" 과 "우리가 헛기다린 것" 은 대응이
+   * 정반대다. 실측에서 8단계(동의)가 6.9초였는데 어느 쪽인지 구분할 수가 없었다.
+   * 매 tick 마다 지금 무엇 때문에 못 누르는지를 적어 시간을 나눠 담는다.
+   *
+   * 화면 안정 = 앞 단계 클릭 뒤 화면이 잠잠해지기를 기다림 (settleMs/maxSettleMs)
+   * 요소 없음 = 누를 것이 아직 화면에 안 나타남 (페이지가 느린 쪽)
+   * 가림     = 나타났지만 무언가에 덮여 있음 */
+  var phaseMs = {}, lastTickAt = 0;
+  function phase(name, now) {
+    /* 탭이 숨겨져 타이머가 늦춰지면 한 tick 이 몇 초로 벌어진다. 그걸 그대로 담으면
+     * 원인 분석이 아니라 스로틀링 측정이 된다. 한 tick 몫만 담는다. */
+    var d = lastTickAt ? now - lastTickAt : 0;
+    if (d > 0 && d < 1000) phaseMs[name] = (phaseMs[name] || 0) + d;
+    lastTickAt = now;
+  }
+
   function markStep(n, label) {
     var t = Date.now();
     if (S.stepStartedAt) {
       if (!S.times) S.times = [];
-      S.times.push({ n: n, label: String(label || '').slice(0, 22), ms: t - S.stepStartedAt });
+      var why = Object.keys(phaseMs)
+        .filter(function (k) { return phaseMs[k] >= 250; })
+        .sort(function (a, b) { return phaseMs[b] - phaseMs[a]; })
+        .map(function (k) { return k + ' ' + (phaseMs[k] / 1000).toFixed(1) + 's'; });
+      S.times.push({ n: n, label: String(label || '').slice(0, 22),
+                     ms: t - S.stepStartedAt, why: why.join(', ') });
     }
+    /* 다음 단계는 기준점을 새로 잡는다. 안 그러면 직전 단계의 마지막 tick 부터
+     * 흐른 시간이 새 단계 몫으로 넘어온다. */
+    phaseMs = {};
+    lastTickAt = 0;
     S.stepStartedAt = t;
   }
 
@@ -180,7 +205,8 @@
     if (!a.length) return '';
     a.sort(function (x, y) { return y.ms - x.ms; });
     return '  느린 단계: ' + a.slice(0, 3).map(function (x) {
-      return x.n + '.' + x.label + ' ' + (x.ms / 1000).toFixed(1) + 's';
+      return x.n + '.' + x.label + ' ' + (x.ms / 1000).toFixed(1) + 's'
+           + (x.why ? ' (' + x.why + ')' : '');
     }).join(', ');
   }
 
@@ -453,7 +479,7 @@
      * 기다린다. 계속 바뀌기만 하는 화면도 있으므로 상한을 둔다. */
     if (S.idx > 0 && lastClickAt) {
       var quiet = now - Math.max(lastMutAt, lastClickAt);
-      if (quiet < S.settleMs && now - lastClickAt < S.maxSettleMs) return;
+      if (quiet < S.settleMs && now - lastClickAt < S.maxSettleMs) { phase('화면 안정', now); return; }
     }
 
     /* ensure 단계: "지금 값이 want 면 그대로 두고, 아니면 골라서 맞춘다".
@@ -685,6 +711,7 @@
     S.times = []; S.stepStartedAt = Date.now();
     }
     if (!el) {
+      phase(blockedEl ? '가림' : '요소 없음', now);
       if (!waitingSince) waitingSince = now;
       /* optional: 이 화면에 아예 없을 수 있는 단계. 기다려보고 없으면 조용히 넘어간다. */
       if (step.optional && !blockedEl && now - waitingSince > (S.optionalMs || 400)) {
