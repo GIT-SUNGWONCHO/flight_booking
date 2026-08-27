@@ -24,79 +24,83 @@ reset_browsers() {
 
 stage() { printf '\n\033[36m%s\033[0m\n' "$1"; }
 
-stage "[1/19] 라벨 판정 유닛테스트"
+stage "[1/20] 라벨 판정 유닛테스트"
 node test/test_autoconfirm.js
 
-stage "[2/19] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트"
+stage "[2/20] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트"
 node test/test_util.js
 
-stage "[3/19] 유저스크립트 빌드"
+stage "[3/20] 유저스크립트 빌드"
 node build.mjs
 node --check userscript/ke-award-macro.user.js
 
 reset_browsers
-stage "[4/19] 브라우저 통합테스트"
+stage "[4/20] 브라우저 통합테스트"
 "$PY" test/test_integration.py
 
 reset_browsers
-stage "[5/19] 유저스크립트(HUD) 테스트"
+stage "[5/20] 유저스크립트(HUD) 테스트"
 "$PY" test/test_hud.py
 
 reset_browsers
-stage "[6/19] 녹화/재생 테스트"
+stage "[6/20] 녹화/재생 테스트"
 "$PY" test/test_recorder.py
 
 reset_browsers
-stage "[7/19] 단계 편집 테스트"
+stage "[7/20] 단계 편집 테스트"
 "$PY" test/test_editor.py
 
 reset_browsers
-stage "[8/19] 단계 우선순위 테스트"
+stage "[8/20] 단계 우선순위 테스트"
 "$PY" test/test_precedence.py
 
 reset_browsers
-stage "[9/19] 건너뜀 보고 / 추측클릭 제거 확인"
+stage "[9/20] 건너뜀 보고 / 추측클릭 제거 확인"
 "$PY" test/test_skipreport.py
 
 reset_browsers
-stage "[10/19] 헛클릭 감지·재시도 테스트"
+stage "[10/20] 헛클릭 감지·재시도 테스트"
 "$PY" test/test_deadclick.py
 
 reset_browsers
-stage "[11/19] 모달 가림 테스트"
+stage "[11/20] 모달 가림 테스트"
 "$PY" test/test_modalblock.py
 
 reset_browsers
-stage "[12/19] 스크롤 팝업 테스트"
+stage "[12/20] 스크롤 팝업 테스트"
 "$PY" test/test_scrollmodal.py
 
 reset_browsers
-stage "[13/19] 중복 동의 테스트"
+stage "[13/20] 중복 동의 테스트"
 "$PY" test/test_doubleagree.py
 
 reset_browsers
-stage "[14/19] 동의 2개 모달 테스트"
+stage "[14/20] 동의 2개 모달 테스트"
 "$PY" test/test_twoagree.py
 
 reset_browsers
-stage "[15/19] 셀렉터 집기 / 패널 드래그 테스트"
+stage "[15/20] 셀렉터 집기 / 패널 드래그 테스트"
 "$PY" test/test_picker.py
 
 reset_browsers
-stage "[16/19] 건너뛰기 금지 테스트"
+stage "[16/20] 건너뛰기 금지 테스트"
 "$PY" test/test_noskip.py
 
 reset_browsers
-stage "[17/19] 무장 유지 / 결제창 판정 테스트"
+stage "[17/20] 무장 유지 / 결제창 판정 테스트"
 "$PY" test/test_armpersist.py
 
 reset_browsers
-stage "[18/19] 달력 최신날짜 / 목표날짜 형식 테스트"
+stage "[18/20] 달력 최신날짜 / 목표날짜 형식 테스트"
 "$PY" test/test_calendar.py
 
 reset_browsers
-stage "[19/19] 통화 KRW / 결제수단 대체 테스트"
+stage "[19/20] 통화 KRW / 결제수단 대체 테스트"
 "$PY" test/test_currency.py
+
+reset_browsers
+stage "[20/20] 통화 변경 후 화면 되돌아감 테스트"
+"$PY" test/test_currestart.py
 
 reset_browsers
 printf '\n\033[32m전체 통과\033[0m\n'

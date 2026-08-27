@@ -71,7 +71,7 @@
      * 그래서 재생이 끝나면 결제창이 실제로 떴는지 확인하라고 알린다. */
     allowPay: true,
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
-    optionalMs: 2500,     // optional 단계를 이만큼 기다려보고 없으면 넘어간다
+    optionalMs: 400,      // optional 단계 대기 (주 수단은 onlyIfPrev - 대기가 없다)
     gapMs: 80,            // 클릭 사이 최소 간격
     settleMs: 250,        // 이만큼 화면이 잠잠해야 다음 단계를 누른다
     maxSettleMs: 2500,    // 계속 바뀌기만 하면 이 시간 뒤에는 그냥 누른다
@@ -214,6 +214,7 @@
   var lastMutAt = 0;
   var retries = 0;
   var blockedEl = null;   // 찾았지만 무언가에 가려 못 누르는 요소
+  var lastLabel = '';     // 직전 단계에서 실제로 누른 요소의 라벨 (onlyIfPrev 판단용)
   var scrollClicks = 0;   // 이번 스크롤 단계에서 몇 번 눌렀는지
   var ensurePhase = 0;    // ensure 진행 단계: 0 시작 / 1 목록 열림 / 2 적용 대기
   var OURS = '#ke-hud, #ke-editor, #ke-export';
@@ -274,6 +275,7 @@
     S.playing = true;
     if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.problem = false; }
     scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
+    lastLabel = '';
     ensurePhase = 0;
     retries = 0;
     waitingSince = 0;
@@ -379,13 +381,36 @@
      * 라벨을 고르고 -> [적용] 을 눌러야 반영된다. 적용을 빠뜨리면 모달만 열렸다 닫히고
      * 통화는 그대로다. 그래서 optionSel/applySel 을 단계에 적어둔다.
      * 네이티브 <select> 면 클릭으로는 목록이 안 열리므로 value 를 직접 바꾼다. */
+    /* onlyIfPrev: 직전 단계에서 이걸 눌렀을 때만 진행한다.
+     * 카드 종류는 카드 결제를 골랐을 때만 나타난다. 예전엔 "없으면 2.5초 기다렸다
+     * 넘어감" 이었는데, 09:00 경쟁에서 의미 없이 2.5초를 버리는 짓이다.
+     * 앞에서 무엇을 눌렀는지는 이미 알고 있으니 기다릴 이유가 없다. */
+    if (step.onlyIfPrev && lastLabel.indexOf(step.onlyIfPrev) === -1) {
+      S.idx++; retries = 0; waitingSince = 0; save();
+      log('재생 ' + S.idx + '/' + S.steps.length + ': 해당 없어 건너뜀 ('
+          + step.onlyIfPrev + ' 을 안 골랐음)');
+      return;
+    }
+
     if (step.ensure) {
       var ctrl = (step.sel ? U.findEl(step.sel, '', { selectorOnly: true }) : null)
                  || U.findContaining(step.text);
 
-      var doneEnsure = function (how) {
+    /* changed=true 는 실제로 값을 바꿨다는 뜻이다.
+     * 통화를 바꾸면 사이트가 화면을 다시 그리면서 처음 페이지로 돌아간다. 그대로
+     * 다음 단계로 가면 그 요소가 있을 리 없어 통째로 막힌다(실측). restartFrom 이
+     * 있으면 그 단계부터 다시 밟는다 - 두 번째에는 이미 KRW 라 통과하므로 반복되지
+     * 않는다. 이미 맞아서 아무것도 안 바꿨으면 되돌아갈 이유가 없다. */
+      var doneEnsure = function (how, changed) {
         ensurePhase = 0;
-        S.idx++; retries = 0; waitingSince = 0; lastClickAt = now; save();
+        retries = 0; waitingSince = 0; lastClickAt = now;
+        if (changed && typeof step.restartFrom === 'number') {
+          S.idx = step.restartFrom;
+          save();
+          log(how + ' - 화면이 되돌아가므로 ' + (step.restartFrom + 1) + '단계부터 다시 진행합니다');
+          return;
+        }
+        S.idx++; save();
         log('재생 ' + S.idx + '/' + S.steps.length + ': ' + how + '  [' + secs(elapsed()) + ']');
       };
 
@@ -402,7 +427,7 @@
             nsel.dispatchEvent(new Event('input', { bubbles: true }));
             nsel.dispatchEvent(new Event('change', { bubbles: true }));
           } catch (e) {}
-          doneEnsure(step.ensure + ' 로 맞춤 (select)');
+          doneEnsure(step.ensure + ' 로 맞춤 (select)', true);
           return;
         }
         if (now - waitingSince > S.stepTimeoutMs) {
@@ -421,7 +446,7 @@
           if (!waitingSince) waitingSince = now;
           /* optional: 이 화면에 아예 없을 수 있는 단계 (네이버페이로 결제하면
            * 카드 종류 드롭다운이 나타나지 않는다). 잠깐 기다려보고 없으면 넘어간다. */
-          if (step.optional && now - waitingSince > (S.optionalMs || 2500)) {
+          if (step.optional && now - waitingSince > (S.optionalMs || 400)) {
             S.idx++; retries = 0; waitingSince = 0; save();
             log('재생 ' + S.idx + '/' + S.steps.length + ': 이 화면에 없어 건너뜀 - '
                 + (step.text || step.sel).slice(0, 20));
@@ -454,7 +479,7 @@
         lastClickAt = now;
         U.fireClick(opt);
         if (step.applySel || step.applyText) { ensurePhase = 2; waitingSince = now; return; }
-        doneEnsure(step.ensure + ' 로 맞춤');
+        doneEnsure(step.ensure + ' 로 맞춤', true);
         return;
       }
 
@@ -469,7 +494,7 @@
       }
       lastClickAt = now;
       U.fireClick(ap);
-      doneEnsure(step.ensure + ' 로 맞추고 적용');
+      doneEnsure(step.ensure + ' 로 맞추고 적용', true);
       return;
     }
 
@@ -555,7 +580,7 @@
     if (!el) {
       if (!waitingSince) waitingSince = now;
       /* optional: 이 화면에 아예 없을 수 있는 단계. 기다려보고 없으면 조용히 넘어간다. */
-      if (step.optional && !blockedEl && now - waitingSince > (S.optionalMs || 2500)) {
+      if (step.optional && !blockedEl && now - waitingSince > (S.optionalMs || 400)) {
         S.idx++; retries = 0; waitingSince = 0; save();
         log('재생 ' + S.idx + '/' + S.steps.length + ': 이 화면에 없어 건너뜀 - '
             + (step.text || step.sel).slice(0, 20) + '  [' + secs(elapsed()) + ']');
@@ -588,6 +613,7 @@
      * 누르기 직전의 open 기록을 잡아두고, 잠시 뒤 새 기록이 생겼는지로 판정한다. */
     var payBefore = isPay(step) ? ((S.lastOpen && S.lastOpen.at) || 0) : null;
 
+    lastLabel = U.label(el);   // 다음 단계의 onlyIfPrev 판단에 쓴다
     U.fireClick(el);
 
 

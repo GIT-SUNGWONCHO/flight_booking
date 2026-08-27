@@ -40,28 +40,25 @@ html += '<button id="card">한국발행 신용/체크카드</button>';
 /* 카드로 갈 때만 종류 드롭다운이 나타난다. 기본은 "선택" 이라 골라줘야 한다.
    네이버페이로 가면 이 영역이 아예 없다 - optional 단계가 넘어가야 하는 상황. */
 if (q.get('npay') === '0') {
-  html += '<div><button id="cardtype">한국발행 신용/체크카드 종류 <span id="ctval">선택</span></button>'
-        + '<div id="ctopts" style="display:none">'
-        + '<button class="ct" data-v="현대카드">현대카드</button>'
-        + '<button class="ct" data-v="하나카드(구 외환, 하나SK)">하나카드(구 외환, 하나SK)</button>'
-        + '</div></div>';
+  /* 실제 사이트와 동일하게 네이티브 <select>. 옵션은 브라우저가 그리므로
+     클릭으로는 못 고르고 value 를 바꿔야 한다. 기본값은 "선택". */
+  html += '<div><label>한국발행 신용/체크카드 종류</label>'
+        + '<select id="sel-korCardCompany">'
+        + '<option value="">선택</option>'
+        + '<option value="BC">비씨카드</option>'
+        + '<option value="HD">현대카드</option>'
+        + '</select></div>';
 }
 document.getElementById('pays').innerHTML = html;
 document.querySelectorAll('#pays > button').forEach(function (b) {
   b.onclick = function () { window.__picked = b.id; };
 });
 window.__ctClicks = 0;
-var ct = document.getElementById('cardtype');
-if (ct) {
-  ct.onclick = function () {
-    window.__ctClicks++;
-    document.getElementById('ctopts').style.display = 'block';
-  };
-  document.querySelectorAll('.ct').forEach(function (b) {
-    b.onclick = function () {
-      document.getElementById('ctval').textContent = b.dataset.v;
-      document.getElementById('ctopts').style.display = 'none';
-    };
+var ctSel = document.getElementById('sel-korCardCompany');
+if (ctSel) {
+  ctSel.addEventListener('click', function () { window.__ctClicks++; });
+  ctSel.addEventListener('change', function () {
+    window.__ctChanges = (window.__ctChanges || 0) + 1;
   });
 }
 </script>

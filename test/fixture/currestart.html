@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8"><title>통화 적용 후 화면 되돌아감</title>
+<style>body{font:14px sans-serif;padding:20px} button{padding:8px 14px;margin:4px}
+ #flights{display:none} #flights.on{display:block}</style>
+<body>
+<!-- 실측: 통화를 바꾸고 [적용] 을 누르면 사이트가 화면을 다시 그리면서 처음 페이지로
+     돌아간다. 그대로 다음 단계로 가면 요소가 없어 통째로 막힌다.
+     여기서는 [적용] 이 실제 페이지 이동을 일으켜 항공편 화면이 닫히게 만든다. -->
+<button id="date">22 08월 22일 (일)</button>
+<button id="search">검색</button>
+<div id="flights">
+  <button id="seat">일반석 35,000 마일</button>
+  <button id="currencyBtn">통화 <span id="curval">USD</span></button>
+  <div id="filter-currency" style="display:none">
+    <div class="filter__list">
+      <div class="filter__item"><label data-v="USD">USD</label></div>
+      <div class="filter__item"><label data-v="KRW">KRW</label></div>
+    </div>
+    <button class="filter__apply">적용</button>
+  </div>
+  <button id="next">다음</button>
+</div>
+<script>
+var q = new URLSearchParams(location.search);
+if (q.get('cur')) document.getElementById('curval').textContent = q.get('cur');
+try { if (!sessionStorage.getItem('log')) sessionStorage.setItem('log', '[]'); } catch (e) {}
+function note(k) {
+  try { var a = JSON.parse(sessionStorage.getItem('log') || '[]'); a.push(k);
+        sessionStorage.setItem('log', JSON.stringify(a)); } catch (e) {}
+}
+document.getElementById('date').onclick = function () { note('date'); };
+document.getElementById('search').onclick = function () {
+  note('search'); document.getElementById('flights').className = 'on';
+};
+document.getElementById('seat').onclick = function () { note('seat'); };
+document.getElementById('currencyBtn').onclick = function () {
+  document.getElementById('filter-currency').style.display = 'block';
+};
+var pending = null;
+document.querySelectorAll('#filter-currency label').forEach(function (b) {
+  b.onclick = function () { pending = b.dataset.v; };
+});
+document.querySelector('.filter__apply').onclick = function () {
+  note('apply');
+  // 적용하면 화면을 다시 그리며 처음으로 돌아간다 (실제 사이트와 같은 성질)
+  location.search = '?cur=' + (pending || 'USD');
+};
+document.getElementById('next').onclick = function () { note('next'); };
+</script>
+</body>

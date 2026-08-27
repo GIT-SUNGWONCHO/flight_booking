@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,8 +38,8 @@ STEPS = """() => {
      applySel:'#filter-currency .filter__apply', applyText:'적용'},
     {sel:'', text:'Npay', tag:'button', url:'/x',
      alt:[{sel:'', text:'한국발행 신용/체크카드'}]},
-    {ensure:'현대카드', optional:true, sel:'', text:'한국발행 신용/체크카드 종류',
-     tag:'button', url:'/x'}
+    {ensure:'현대카드', onlyIfPrev:'한국발행', sel:'#sel-korCardCompany',
+     text:'한국발행 신용/체크카드 종류', tag:'select', url:'/x', selectorOnly:true}
   ];
   R.state.optionalMs = 700;
   R.state.idx = 0; R.state.startedAt = 0; R.state.problem = false;
@@ -66,13 +67,16 @@ def main() -> int:
             ):
                 pg.goto(BASE + query, timeout=60000)
                 pg.wait_for_timeout(400)
+                t0 = time.time()
                 pg.evaluate(STEPS)
                 pg.wait_for_function("() => !window.KE_REC.state.playing", timeout=20000)
+                took = time.time() - t0
                 st = pg.evaluate("""() => ({
                   cur: document.getElementById('curval').textContent,
                   clicks: window.__curClicks, picked: window.__picked,
                   applied: window.__applied || 0,
-                  ct: (document.getElementById('ctval')||{}).textContent || null,
+                  ct: (function(){ var e=document.getElementById('sel-korCardCompany');
+                        return e ? e.options[e.selectedIndex].text : null; })(),
                   ctClicks: window.__ctClicks || 0,
                   idx: KE_REC.state.idx, total: KE_REC.state.steps.length,
                   problem: KE_REC.state.problem})""")
@@ -88,7 +92,10 @@ def main() -> int:
                           f"{cur_label}: 카드 종류가 {want_ct} (실제 {st['ct']})")
                 else:
                     check(st["ctClicks"] == 0,
-                          f"{cur_label}: 카드 종류 단계는 없으니 건너뜀 (클릭 {st['ctClicks']}회)")
+                          f"{cur_label}: 카드 종류 단계를 건너뜀 (클릭 {st['ctClicks']}회)")
+                    # 예전엔 "없으면 2.5초 기다렸다 넘어감" 이었다. 09:00 경쟁에서
+                    # 의미 없이 버리는 시간이라, 앞에서 무엇을 눌렀는지로 즉시 판단한다.
+                    check(took < 1.5, f"{cur_label}: 대기 없이 끝남 (실제 {took:.2f}s)")
                 check(st["idx"] == st["total"] and not st["problem"],
                       f"{cur_label}: 끝까지 진행 ({st['idx']}/{st['total']}, problem={st['problem']})")
         finally:
