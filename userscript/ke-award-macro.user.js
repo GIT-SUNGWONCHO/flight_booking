@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.23.0
+// @version      1.24.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -523,7 +523,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.23.0', hash: 'f1dcb49' };
+  var B = { version: '1.24.0', hash: '1991b35' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -2182,15 +2182,16 @@ try {
      * 누르는 단계가 아직 없다. 그대로 진행하면 엉뚱한 날 좌석을 누른다.
      * 3초 벌자고 낼 값이 아니므로, 그 단계가 생기기 전까지는 달력으로 간다. */
     /* 날짜가 다르면 눌러서 바꿔야 하는데, 그 단계가 없다. 그대로 진행하면 엉뚱한
-     * 날 좌석을 누른다 - 3초 벌자고 낼 값이 아니다.
+     * 날 좌석을 누른다 - 몇 초 벌자고 낼 값이 아니다.
      *
-     * 애초에 바꿀 일을 만들지 않는 것이 낫다: 09:00 전에 조회 화면을 목표 날짜로
-     * 맞춰두면 된다. 그날 좌석이 아직 없어 "결과 없음" 이 뜨지만, 검색 조건은
-     * 서버 세션에 남으므로 09:00 에 새로고침하면 그 날짜로 다시 조회된다. */
+     * 한때 "09:00 전에 조회 화면을 목표 날짜로 맞춰두면 된다" 고 생각했는데 틀렸다.
+     * 새로 열리는 날짜는 09:00 에야 예약 가능 창에 들어오므로, 08:59 에는 그 날을
+     * 고를 수조차 없다. 그래서 이 모드는 아직 09:00 경쟁에는 못 쓴다 -
+     * 조회 화면의 날짜 띠를 눌러 바꾸는 단계가 있어야 완성된다. */
     if (seen !== st.expectDate) {
       return { why: '이 화면은 ' + seen + ' 인데 목표는 ' + st.expectDate + ' 입니다'
-                    + ' - 조회 화면을 ' + st.expectDate + ' 로 맞춰두고 대기하세요'
-                    + ' (좌석이 없어도 됩니다)' };
+                    + ' - 이 모드는 아직 화면의 날짜를 바꾸지 못합니다.'
+                    + ' 09:00 에는 [달력] 모드를 쓰세요' };
     }
     return { inPlace: true, from: from, seen: seen, why: '' };
   }
@@ -2561,8 +2562,8 @@ try {
       '결제하기까지 자동 (결제창 열림)</label>' +
       '<label><b>시작 화면</b> - 발사할 때 이 화면에 서 있어야 합니다</label>' +
       '<select id="ke-startat">' +
-      '<option value="calendar">달력 (기본) - 새로 열린 날짜를 찾아서 조회</option>' +
-      '<option value="departure">조회 화면 - 목표 날짜로 맞춰두고 그 자리에서</option>' +
+      '<option value="calendar">달력 (기본, 검증됨) - 새로 열린 날짜를 찾아서 조회</option>' +
+      '<option value="departure">조회 화면 (미완성 - 09:00 에는 쓰지 마세요)</option>' +
       '</select>' +
       '<div id="ke-skipcal-why" style="margin:2px 0 0 2px"></div>' +
       '<div style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
