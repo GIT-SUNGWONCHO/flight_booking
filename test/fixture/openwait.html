@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8"><title>목표 날짜 오픈 대기</title>
+<style>body{font:14px sans-serif;padding:20px} td{border:1px solid #ddd;padding:8px}</style>
+<body>
+<!-- 처음엔 20일까지만 열려 있고, 세 번째 로드부터 21일이 열린다.
+     목표 날짜가 화면에 없으면 멈추지 말고 새로고침해서 다시 봐야 한다. -->
+<table><tr id="row"></tr></table>
+<button id="next">다음</button>
+<script>
+var n = 0;
+try { n = parseInt(sessionStorage.getItem('loads') || '0', 10) + 1;
+      sessionStorage.setItem('loads', String(n)); } catch (e) { n = 1; }
+window.__loads = n;
+var days = ['19 08월 19일 (목)', '20 08월 20일 (금)'];
+if (n >= 3) days.push('21 08월 21일 (토)');   // 세 번째 로드부터 열림
+document.getElementById('row').innerHTML = days.map(function (d, i) {
+  return '<td id="dep-fare-3-' + i + '">' + d + '</td>';
+}).join('');
+document.querySelectorAll('td').forEach(function (t) {
+  t.onclick = function () { window.__picked = t.textContent; };
+});
+document.getElementById('next').onclick = function () { window.__next = true; };
+</script>
+</body>

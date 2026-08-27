@@ -17,99 +17,109 @@ function Invoke-Stage([string]$Title, [scriptblock]$Body, [string]$OnFail) {
   if ($LASTEXITCODE -ne 0) { throw $OnFail }
 }
 
-Invoke-Stage "[1/20] 라벨 판정 유닛테스트" { node test/test_autoconfirm.js } "유닛테스트 실패"
+Invoke-Stage "[1/22] 라벨 판정 유닛테스트" { node test/test_autoconfirm.js } "유닛테스트 실패"
 
-Invoke-Stage "[2/20] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트" { node test/test_util.js } "유틸 유닛테스트 실패"
+Invoke-Stage "[2/22] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트" { node test/test_util.js } "유틸 유닛테스트 실패"
 
-Invoke-Stage "[3/20] 유저스크립트 빌드" {
+Invoke-Stage "[3/22] 유저스크립트 빌드" {
   node build.mjs
   node --check userscript/ke-award-macro.user.js
 } "빌드 실패"
 
 Reset-Browsers
-Invoke-Stage "[4/20] 브라우저 통합테스트" {
+Invoke-Stage "[4/22] 브라우저 통합테스트" {
   & ./.venv/Scripts/python.exe test/test_integration.py
 } "통합테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[5/20] 유저스크립트(HUD) 테스트" {
+Invoke-Stage "[5/22] 유저스크립트(HUD) 테스트" {
   & ./.venv/Scripts/python.exe test/test_hud.py
 } "HUD 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[6/20] 녹화/재생 테스트" {
+Invoke-Stage "[6/22] 녹화/재생 테스트" {
   & ./.venv/Scripts/python.exe test/test_recorder.py
 } "녹화/재생 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[7/20] 단계 편집 테스트" {
+Invoke-Stage "[7/22] 단계 편집 테스트" {
   & ./.venv/Scripts/python.exe test/test_editor.py
 } "편집 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[8/20] 단계 우선순위 테스트" {
+Invoke-Stage "[8/22] 단계 우선순위 테스트" {
   & ./.venv/Scripts/python.exe test/test_precedence.py
 } "우선순위 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[9/20] 건너뜀 보고 / 추측클릭 제거 확인" {
+Invoke-Stage "[9/22] 건너뜀 보고 / 추측클릭 제거 확인" {
   & ./.venv/Scripts/python.exe test/test_skipreport.py
 } "건너뜀 보고 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[10/20] 헛클릭 감지·재시도 테스트" {
+Invoke-Stage "[10/22] 헛클릭 감지·재시도 테스트" {
   & ./.venv/Scripts/python.exe test/test_deadclick.py
 } "헛클릭 재시도 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[11/20] 모달 가림 테스트" {
+Invoke-Stage "[11/22] 모달 가림 테스트" {
   & ./.venv/Scripts/python.exe test/test_modalblock.py
 } "모달 가림 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[12/20] 스크롤 팝업 테스트" {
+Invoke-Stage "[12/22] 스크롤 팝업 테스트" {
   & ./.venv/Scripts/python.exe test/test_scrollmodal.py
 } "스크롤 팝업 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[13/20] 중복 동의 테스트" {
+Invoke-Stage "[13/22] 중복 동의 테스트" {
   & ./.venv/Scripts/python.exe test/test_doubleagree.py
 } "중복 동의 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[14/20] 동의 2개 모달 테스트" {
+Invoke-Stage "[14/22] 동의 2개 모달 테스트" {
   & ./.venv/Scripts/python.exe test/test_twoagree.py
 } "동의 2개 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[15/20] 셀렉터 집기 / 패널 드래그 테스트" {
+Invoke-Stage "[15/22] 셀렉터 집기 / 패널 드래그 테스트" {
   & ./.venv/Scripts/python.exe test/test_picker.py
 } "집기/드래그 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[16/20] 건너뛰기 금지 테스트" {
+Invoke-Stage "[16/22] 건너뛰기 금지 테스트" {
   & ./.venv/Scripts/python.exe test/test_noskip.py
 } "건너뛰기 금지 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[17/20] 무장 유지 / 결제창 판정 테스트" {
+Invoke-Stage "[17/22] 무장 유지 / 결제창 판정 테스트" {
   & ./.venv/Scripts/python.exe test/test_armpersist.py
 } "무장 유지 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[18/20] 달력 최신날짜 / 목표날짜 형식 테스트" {
+Invoke-Stage "[18/22] 달력 최신날짜 / 목표날짜 형식 테스트" {
   & ./.venv/Scripts/python.exe test/test_calendar.py
 } "달력 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[19/20] 통화 KRW / 결제수단 대체 테스트" {
+Invoke-Stage "[19/22] 통화 KRW / 결제수단 대체 테스트" {
   & ./.venv/Scripts/python.exe test/test_currency.py
 } "통화/결제수단 테스트 실패"
 
 Reset-Browsers
-Invoke-Stage "[20/20] 통화 변경 후 화면 되돌아감 테스트" {
+Invoke-Stage "[20/22] 통화 변경 후 화면 되돌아감 테스트" {
   & ./.venv/Scripts/python.exe test/test_currestart.py
 } "통화 재시작 테스트 실패"
+
+Reset-Browsers
+Invoke-Stage "[21/22] 발사 시각 입력 테스트" {
+  & ./.venv/Scripts/python.exe test/test_opentime.py
+} "발사 시각 테스트 실패"
+
+Reset-Browsers
+Invoke-Stage "[22/22] 목표 날짜 오픈 대기 테스트" {
+  & ./.venv/Scripts/python.exe test/test_openwait.py
+} "목표 날짜 대기 테스트 실패"
 
 Reset-Browsers
 Write-Host "`n전체 통과" -ForegroundColor Green

@@ -70,6 +70,9 @@
      * 주지 않아 새 창을 막는 경우가 있는데, 그러면 "눌렀다" 는 로그만 남는다.
      * 그래서 재생이 끝나면 결제창이 실제로 떴는지 확인하라고 알린다. */
     allowPay: true,
+    openWaitSince: 0,     // 목표 날짜가 열리기를 기다리기 시작한 시각(페이지 이동을 넘어 유지)
+    openRetryMs: 1200,    // 목표 날짜가 없을 때 새로고침 간격 (서버 부담 하한)
+    openWaitMaxMs: 180000,// 이만큼 기다려도 안 열리면 사람을 부른다
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
     optionalMs: 400,      // optional 단계 대기 (주 수단은 onlyIfPrev - 대기가 없다)
     gapMs: 80,            // 클릭 사이 최소 간격
@@ -215,6 +218,7 @@
   var retries = 0;
   var blockedEl = null;   // 찾았지만 무언가에 가려 못 누르는 요소
   var lastLabel = '';     // 직전 단계에서 실제로 누른 요소의 라벨 (onlyIfPrev 판단용)
+  var lastOpenReloadAt = 0;  // 목표 날짜를 기다리며 마지막으로 새로고침한 시각
   var scrollClicks = 0;   // 이번 스크롤 단계에서 몇 번 눌렀는지
   var ensurePhase = 0;    // ensure 진행 단계: 0 시작 / 1 목록 열림 / 2 적용 대기
   var OURS = '#ke-hud, #ke-editor, #ke-export';
@@ -276,6 +280,7 @@
     if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.problem = false; }
     scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
     lastLabel = '';
+    S.openWaitSince = 0;
     ensurePhase = 0;
     retries = 0;
     waitingSince = 0;
@@ -573,9 +578,26 @@
         return;
       }
       if (!same) {
-        pause('목표 날짜(' + S.expectDate + ')와 다릅니다 - 감지된 최신 오픈일: ' + got.slice(0, 30));
+        /* 목표 날짜가 화면에 없다 = 아직 안 열렸거나 화면이 낡았다는 뜻이다.
+         * 멈춰서 기다리는 건 09:00 경쟁에서 최악이다 - 새로고침해서 다시 본다.
+         * 서버를 두드리는 일이라 간격에 하한을 두고, 오래 안 열리면 사람을 부른다. */
+        if (!S.openWaitSince) S.openWaitSince = now;
+        if (now - S.openWaitSince > S.openWaitMaxMs) {
+          finish('목표 날짜(' + S.expectDate + ')가 ' + Math.round(S.openWaitMaxMs / 1000)
+                 + '초 동안 안 열렸습니다 - 화면을 확인하세요 (마지막 감지: '
+                 + got.slice(0, 24) + ')', true);
+          return;
+        }
+        if (now - lastOpenReloadAt < S.openRetryMs) return;
+        lastOpenReloadAt = now;
+        S.idx = 0;
+        save();
+        log('목표 날짜(' + S.expectDate + ')가 아직 없습니다 (감지: ' + got.slice(0, 20)
+            + ') - 새로고침하고 다시 봅니다');
+        setTimeout(function () { location.reload(); }, 0);
         return;
       }
+      S.openWaitSince = 0;
     }
     if (!el) {
       if (!waitingSince) waitingSince = now;

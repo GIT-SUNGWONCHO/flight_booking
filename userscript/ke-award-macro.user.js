@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.17.0
+// @version      1.18.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -418,7 +418,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.17.0', hash: '87e95cf' };
+  var B = { version: '1.18.0', hash: '3813ebb' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -516,6 +516,9 @@ try {
      * 주지 않아 새 창을 막는 경우가 있는데, 그러면 "눌렀다" 는 로그만 남는다.
      * 그래서 재생이 끝나면 결제창이 실제로 떴는지 확인하라고 알린다. */
     allowPay: true,
+    openWaitSince: 0,     // 목표 날짜가 열리기를 기다리기 시작한 시각(페이지 이동을 넘어 유지)
+    openRetryMs: 1200,    // 목표 날짜가 없을 때 새로고침 간격 (서버 부담 하한)
+    openWaitMaxMs: 180000,// 이만큼 기다려도 안 열리면 사람을 부른다
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
     optionalMs: 400,      // optional 단계 대기 (주 수단은 onlyIfPrev - 대기가 없다)
     gapMs: 80,            // 클릭 사이 최소 간격
@@ -661,6 +664,7 @@ try {
   var retries = 0;
   var blockedEl = null;   // 찾았지만 무언가에 가려 못 누르는 요소
   var lastLabel = '';     // 직전 단계에서 실제로 누른 요소의 라벨 (onlyIfPrev 판단용)
+  var lastOpenReloadAt = 0;  // 목표 날짜를 기다리며 마지막으로 새로고침한 시각
   var scrollClicks = 0;   // 이번 스크롤 단계에서 몇 번 눌렀는지
   var ensurePhase = 0;    // ensure 진행 단계: 0 시작 / 1 목록 열림 / 2 적용 대기
   var OURS = '#ke-hud, #ke-editor, #ke-export';
@@ -722,6 +726,7 @@ try {
     if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.problem = false; }
     scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
     lastLabel = '';
+    S.openWaitSince = 0;
     ensurePhase = 0;
     retries = 0;
     waitingSince = 0;
@@ -1019,9 +1024,26 @@ try {
         return;
       }
       if (!same) {
-        pause('목표 날짜(' + S.expectDate + ')와 다릅니다 - 감지된 최신 오픈일: ' + got.slice(0, 30));
+        /* 목표 날짜가 화면에 없다 = 아직 안 열렸거나 화면이 낡았다는 뜻이다.
+         * 멈춰서 기다리는 건 09:00 경쟁에서 최악이다 - 새로고침해서 다시 본다.
+         * 서버를 두드리는 일이라 간격에 하한을 두고, 오래 안 열리면 사람을 부른다. */
+        if (!S.openWaitSince) S.openWaitSince = now;
+        if (now - S.openWaitSince > S.openWaitMaxMs) {
+          finish('목표 날짜(' + S.expectDate + ')가 ' + Math.round(S.openWaitMaxMs / 1000)
+                 + '초 동안 안 열렸습니다 - 화면을 확인하세요 (마지막 감지: '
+                 + got.slice(0, 24) + ')', true);
+          return;
+        }
+        if (now - lastOpenReloadAt < S.openRetryMs) return;
+        lastOpenReloadAt = now;
+        S.idx = 0;
+        save();
+        log('목표 날짜(' + S.expectDate + ')가 아직 없습니다 (감지: ' + got.slice(0, 20)
+            + ') - 새로고침하고 다시 봅니다');
+        setTimeout(function () { location.reload(); }, 0);
         return;
       }
+      S.openWaitSince = 0;
     }
     if (!el) {
       if (!waitingSince) waitingSince = now;
@@ -1439,13 +1461,56 @@ try {
   /* 입력칸에 손으로 치다 보면 '2026-08-24-09:00:00' 처럼 날짜와 시각 사이가 하이픈이
    * 되거나 공백이 여러 개 들어간다. 그 상태로 형식 오류만 띄우면 정작 9시에 발사가
    * 안 걸린다. 숫자만 뽑아 재조립해서 웬만한 표기는 다 받아준다. */
+  /** 지금 KST 의 연/월/일을 얻는다. */
+  /* 발사 시각 칸을 비워두면 오늘 날짜 + 09:00 으로 채워 넣는다.
+   * 연월일이 눈에 보여야 헷갈리지 않는다는 요청. 동시에 연도를 손으로 칠 일이
+   * 없어지므로 여행 연도(2027)를 넣어 1년 뒤로 예약되는 사고도 막힌다. */
+  function defaultTarget() {
+    var p = kstParts(nowSrv());
+    return p.year + '-' + p.month + '-' + p.day + ' 09:00:00';
+  }
+
+  function kstParts(ms) {
+    var p = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul', hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).formatToParts(new Date(ms)).reduce(function (a, x) { a[x.type] = x.value; return a; }, {});
+    return p;
+  }
+
+  /* 오픈시각 입력을 해석한다.
+   *
+   * "09:00" 처럼 시각만 쳐도 된다 - 오늘 그 시각, 이미 지났으면 내일로 잡는다.
+   * 연도까지 치게 두면 여행 날짜(2027)를 그대로 넣는 실수가 난다. 실제로 그래서
+   * 1년 뒤로 예약된 채 9시에 아무 일도 안 일어났다. 매일 09:00 에 열리는 도구라
+   * 연도를 칠 일이 애초에 없다.
+   *
+   * 날짜까지 주면 그대로 쓴다. 하이픈/슬래시/공백 표기는 모두 받는다. */
   function targetMs() {
     if (!S.targetKst) return NaN;
     var n = String(S.targetKst).match(/\d+/g);
-    if (!n || n.length < 5) return NaN;
-    var p = function (i, d) { return (n[i] === undefined ? d : ('0' + n[i]).slice(-2)); };
-    var iso = n[0] + '-' + p(1) + '-' + p(2) + 'T' + p(3) + ':' + p(4) + ':' + p(5, '00');
-    return Date.parse(iso + '+09:00');
+    if (!n) return NaN;
+    var pad = function (v) { return ('0' + v).slice(-2); };
+    var now = kstParts(nowSrv());
+    var y, mo, d, h, mi, se;
+
+    if (n.length <= 3) {                       // 09 / 09:00 / 09:00:00  -> 오늘(또는 내일)
+      y = now.year; mo = now.month; d = now.day;
+      h = n[0]; mi = n[1] || '00'; se = n[2] || '00';
+    } else if (n.length === 4) {               // 08-27 09:00
+      y = now.year; mo = n[0]; d = n[1]; h = n[2]; mi = n[3]; se = '00';
+    } else if (n[0].length === 4) {            // 2026-08-27 09:00[:00]
+      y = n[0]; mo = n[1]; d = n[2]; h = n[3]; mi = n[4]; se = n[5] || '00';
+    } else {                                   // 08-27 09:00:00
+      y = now.year; mo = n[0]; d = n[1]; h = n[2]; mi = n[3]; se = n[4] || '00';
+    }
+    var t = Date.parse(y + '-' + pad(mo) + '-' + pad(d) + 'T'
+                       + pad(h) + ':' + pad(mi) + ':' + pad(se) + '+09:00');
+    if (isNaN(t)) return NaN;
+    // 시각만 준 경우, 오늘 그 시각이 이미 지났으면 내일로
+    if (n.length <= 3 && t <= nowSrv()) t += 86400000;
+    return t;
   }
 
   /* Date 헤더는 1초 해상도라 그대로 쓰면 ±500ms 오차가 난다.
@@ -1552,10 +1617,18 @@ try {
       var d = T - S.leadMs - n;
       if (d > 0) {
         var s = Math.floor(d / 1000);
-        cdEl.textContent = 'T-' + String(Math.floor(s / 3600)).padStart(2, '0') + ':' +
-          String(Math.floor(s / 60) % 60).padStart(2, '0') + ':' +
-          String(s % 60).padStart(2, '0') + '.' + String(d % 1000).padStart(3, '0');
-        cdEl.style.color = d < 10000 ? '#c00' : '#333';
+        /* 하루가 넘으면 시:분:초로 보여줘봐야 "8759:59:52" 같은 숫자라 눈에 안 들어온다.
+         * 실제로 여행 날짜(2027)를 오픈시각에 넣어 1년 뒤로 예약된 걸 모르고 9시를
+         * 놓친 적이 있다. 날짜 단위로 크게 띄워 바로 알아채게 한다. */
+        if (d > 86400000) {
+          cdEl.textContent = '⚠ ' + Math.floor(d / 86400000) + '일 뒤';
+          cdEl.style.color = '#c60';
+        } else {
+          cdEl.textContent = 'T-' + String(Math.floor(s / 3600)).padStart(2, '0') + ':' +
+            String(Math.floor(s / 60) % 60).padStart(2, '0') + ':' +
+            String(s % 60).padStart(2, '0') + '.' + String(d % 1000).padStart(3, '0');
+          cdEl.style.color = d < 10000 ? '#c00' : '#333';
+        }
       } else {
         cdEl.textContent = 'T+' + Math.floor(-d / 1000) + 's';
         cdEl.style.color = '#c00';
@@ -1567,7 +1640,7 @@ try {
        * fire() 는 무장을 풀고 새로고침하므로 두 번 쏘지 않는다. */
       if (S.armed && d <= 0) fire('정시');
     } else {
-      cdEl.textContent = '오픈시각 미설정';
+      cdEl.textContent = '발사 시각 미설정';
     }
 
     /* 백그라운드 탭은 타이머가 느려진다. 무장 중이면 눈에 띄게 알린다. */
@@ -1583,15 +1656,15 @@ try {
      * 타이머는 없는 상태가 되어, 사용자가 무장된 줄 알고 기다리다 놓친다. */
     if (isNaN(T)) {
       S.armed = false; save(); render();
-      toast('오픈시각 형식 오류 (예: 2026-08-22 10:00:00) - 무장 해제됨', true);
-      setStatus('무장 해제됨 - 오픈시각을 확인하세요');
+      toast('발사 시각 형식 오류 (예: 09:00) - 무장 해제됨', true);
+      setStatus('무장 해제됨 - 발사 시각을 확인하세요');
       return;
     }
     var wait = T - S.leadMs - nowSrv();
     if (wait < 0) {
       S.armed = false; save(); render();
       toast('이미 지난 시각입니다 - 무장 해제됨', true);
-      setStatus('무장 해제됨 - 오픈시각이 이미 지났습니다');
+      setStatus('무장 해제됨 - 발사 시각이 이미 지났습니다');
       return;
     }
     // 남은 시간이 길면 쪼개서 재계산 (setTimeout 드리프트 보정)
@@ -1600,7 +1673,9 @@ try {
       if (left <= 0) { fire('정시'); return; }
       timer = setTimeout(step, left > 5000 ? Math.min(left - 3000, 60000) : Math.max(left - 20, 1));
     })();
-    setStatus('예약 대기 중 - ' + fmtKst(T - S.leadMs) + ' 발사 예정');
+    var left = T - S.leadMs - nowSrv();
+    var far = left > 86400000 ? '  ⚠ ' + Math.floor(left / 86400000) + '일 뒤입니다 - 여기는 여행일이 아니라 발사 시각입니다' : '';
+    setStatus('예약 대기 중 - ' + fmtKst(T - S.leadMs) + ' 발사 예정' + far);
   }
 
   /** targetKst 입력칸이 쓰는 "YYYY-MM-DD HH:MM:SS" (KST) 형식으로 변환 */
@@ -1716,7 +1791,8 @@ try {
       '<span style="float:right;cursor:pointer" id="ke-min">_</span></h4>' +
       '<div id="ke-body">' +
       '<div id="ke-clock">--</div><div id="ke-cd">--</div>' +
-      '<label>오픈시각 (KST)</label><input id="ke-target" placeholder="2026-08-22 10:00:00">' +
+      '<label><b>발사 시각</b> - 매크로가 움직일 시각 (매일 09:00)</label>' +
+      '<input id="ke-target" placeholder="09:00">' +
       '<label>선발사(ms)</label><input id="ke-lead" type="number">' +
       '<button id="ke-sync" style="background:#666;width:100%">시각 동기</button>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
@@ -1728,8 +1804,8 @@ try {
       '<option value="프리미엄">프리미엄</option>' +
       '<option value="일등석">일등석</option>' +
       '</select>' +
-      '<label>목표 날짜 <span style="color:#999">(비우면 검사 안 함)</span></label>' +
-      '<input id="ke-expect" placeholder="08-27">' +
+      '<label><b>목표 날짜</b> - 달력에서 고를 여행일 <span style="color:#999">(비우면 검사 안 함)</span></label>' +
+      '<input id="ke-expect" placeholder="08-21">' +
       '<label style="display:flex;align-items:center;gap:5px;margin-top:6px;color:#c00">' +
       '<input type="checkbox" id="ke-allowpay" style="width:auto">' +
       '결제하기까지 자동 (결제창 열림)</label>' +
@@ -1836,6 +1912,7 @@ try {
       else { if (timer) clearTimeout(timer); timer = null; setStatus('정지됨'); }
     };
 
+    if (!S.targetKst) { S.targetKst = defaultTarget(); save(); }
     render();
     setInterval(tick, 50);
     sync(false);
@@ -1947,6 +2024,7 @@ try {
   }, true);
 
   expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount, save: save, schedule: schedule,
+                     targetMs: targetMs,
                      rehearse: rehearse,
                      offset: function () { return offsetMs; } });
   console.log('%c[KE_HUD] v1.1.0 loaded', 'color:#0b4da2;font-weight:bold');
