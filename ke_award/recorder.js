@@ -70,6 +70,9 @@
      * 주지 않아 새 창을 막는 경우가 있는데, 그러면 "눌렀다" 는 로그만 남는다.
      * 그래서 재생이 끝나면 결제창이 실제로 떴는지 확인하라고 알린다. */
     allowPay: true,
+    times: [],            // 단계별 소요시간 [{n, label, ms}]. 어디서 시간을 쓰는지
+                          // 추측하지 않고 재기 위한 것 - 페이지 이동을 넘어 유지된다
+    stepStartedAt: 0,     // 지금 단계를 시작한 시각
     openWaitSince: 0,     // 목표 날짜가 열리기를 기다리기 시작한 시각(페이지 이동을 넘어 유지)
     openRetryMs: 1200,    // 목표 날짜가 없을 때 새로고침 간격 (서버 부담 하한)
     openWaitMaxMs: 180000,// 이만큼 기다려도 안 열리면 사람을 부른다
@@ -163,6 +166,26 @@
       try { listeners[i](S); } catch (e) {}
     }
   }
+  /* 단계가 넘어갈 때마다 얼마나 걸렸는지 남긴다.
+   * "30초 걸리는데 줄일 수 있나" 는 어디서 쓰는지 알아야 답할 수 있다. */
+  function markStep(n, label) {
+    var t = Date.now();
+    if (S.stepStartedAt) {
+      if (!S.times) S.times = [];
+      S.times.push({ n: n, label: String(label || '').slice(0, 22), ms: t - S.stepStartedAt });
+    }
+    S.stepStartedAt = t;
+  }
+
+  function timeReport() {
+    var a = (S.times || []).slice();
+    if (!a.length) return '';
+    a.sort(function (x, y) { return y.ms - x.ms; });
+    return '  느린 단계: ' + a.slice(0, 3).map(function (x) {
+      return x.n + '.' + x.label + ' ' + (x.ms / 1000).toFixed(1) + 's';
+    }).join(', ');
+  }
+
   function log(msg) {
     console.log('%c[KE_REC] ' + msg, 'color:#a0f;font-weight:bold');
     S.message = msg;
@@ -281,6 +304,7 @@
     scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
     lastLabel = '';
     S.openWaitSince = 0;
+    S.times = []; S.stepStartedAt = Date.now();
     ensurePhase = 0;
     retries = 0;
     waitingSince = 0;
@@ -291,7 +315,7 @@
    * hud 의 알림 판정이 ★완료★ 대신 ⚠멈춤⚠ 을 내도록 한다. */
   function finish(why, problem) {
     S.problem = !!problem;
-    pause(why);
+    pause(why + timeReport());
   }
 
   function pause(why) {
@@ -415,6 +439,7 @@
           log(how + ' - 화면이 되돌아가므로 ' + (step.restartFrom + 1) + '단계부터 다시 진행합니다');
           return;
         }
+        markStep(S.idx + 1, step.ensure || step.text);
         S.idx++; save();
         log('재생 ' + S.idx + '/' + S.steps.length + ': ' + how + '  [' + secs(elapsed()) + ']');
       };
@@ -598,11 +623,13 @@
         return;
       }
       S.openWaitSince = 0;
+    S.times = []; S.stepStartedAt = Date.now();
     }
     if (!el) {
       if (!waitingSince) waitingSince = now;
       /* optional: 이 화면에 아예 없을 수 있는 단계. 기다려보고 없으면 조용히 넘어간다. */
       if (step.optional && !blockedEl && now - waitingSince > (S.optionalMs || 400)) {
+        markStep(S.idx + 1, step.text || step.sel);
         S.idx++; retries = 0; waitingSince = 0; save();
         log('재생 ' + S.idx + '/' + S.steps.length + ': 이 화면에 없어 건너뜀 - '
             + (step.text || step.sel).slice(0, 20) + '  [' + secs(elapsed()) + ']');
@@ -653,6 +680,7 @@
       log('스크롤을 20번 눌렀는데도 버튼이 남아 있습니다 - 팝업을 확인하세요');
     }
 
+    markStep(S.idx + 1, step.text || step.sel);
     S.idx++;
     retries = 0;
     save();

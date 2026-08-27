@@ -180,6 +180,22 @@
     return null;
   }
 
+  /* 로그인이 살아 있는가.
+   * 매일 자동 시도를 걸어두면 밤새 세션이 풀리는 게 가장 흔한 실패다. 그 상태로
+   * 09:00 에 발사하면 로그인 화면만 붙잡고 헛돌다 끝난다 - 그날 좌석은 날아간다.
+   * 확실히 로그아웃일 때만 false 를 돌린다(판정이 애매하면 진행시킨다 - 멀쩡한
+   * 발사를 막는 게 더 나쁘다). */
+  function loggedOut() {
+    var all = candidates(document), sawLogin = false, sawMy = false;
+    for (var i = 0; i < all.length; i++) {
+      if (!visible(all[i])) continue;
+      var t = label(all[i]).replace(/\s/g, '');
+      if (t === '로그인' || t === 'Login' || t === 'SignIn') sawLogin = true;
+      if (t.indexOf('마이페이지') !== -1 || t.indexOf('로그아웃') !== -1) sawMy = true;
+    }
+    return sawLogin && !sawMy;
+  }
+
   /** 라벨에 text 가 "들어 있는" 요소를 찾는다.
    * ensure 컨트롤은 라벨이 상태를 담는다("통화 KRW" / "통화 USD"). 정확 일치로는
    * 영원히 못 찾으므로 부분 일치가 필요하다. 여러 개면 라벨이 가장 짧은 것
@@ -384,6 +400,7 @@
     findLatestOpenDate: findLatestOpenDate, inChrome: inChrome, realTarget: realTarget,
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
+    loggedOut: loggedOut,
     alreadyOn: alreadyOn
   };
   try { W.KE_UTIL = U; } catch (e) {}

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.18.0
+// @version      1.19.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -196,6 +196,22 @@ try {
       }
     }
     return null;
+  }
+
+  /* 로그인이 살아 있는가.
+   * 매일 자동 시도를 걸어두면 밤새 세션이 풀리는 게 가장 흔한 실패다. 그 상태로
+   * 09:00 에 발사하면 로그인 화면만 붙잡고 헛돌다 끝난다 - 그날 좌석은 날아간다.
+   * 확실히 로그아웃일 때만 false 를 돌린다(판정이 애매하면 진행시킨다 - 멀쩡한
+   * 발사를 막는 게 더 나쁘다). */
+  function loggedOut() {
+    var all = candidates(document), sawLogin = false, sawMy = false;
+    for (var i = 0; i < all.length; i++) {
+      if (!visible(all[i])) continue;
+      var t = label(all[i]).replace(/\s/g, '');
+      if (t === '로그인' || t === 'Login' || t === 'SignIn') sawLogin = true;
+      if (t.indexOf('마이페이지') !== -1 || t.indexOf('로그아웃') !== -1) sawMy = true;
+    }
+    return sawLogin && !sawMy;
   }
 
   /** 라벨에 text 가 "들어 있는" 요소를 찾는다.
@@ -402,6 +418,7 @@ try {
     findLatestOpenDate: findLatestOpenDate, inChrome: inChrome, realTarget: realTarget,
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
+    loggedOut: loggedOut,
     alreadyOn: alreadyOn
   };
   try { W.KE_UTIL = U; } catch (e) {}
@@ -418,7 +435,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.18.0', hash: '3813ebb' };
+  var B = { version: '1.19.0', hash: '44c40da' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -516,6 +533,9 @@ try {
      * 주지 않아 새 창을 막는 경우가 있는데, 그러면 "눌렀다" 는 로그만 남는다.
      * 그래서 재생이 끝나면 결제창이 실제로 떴는지 확인하라고 알린다. */
     allowPay: true,
+    times: [],            // 단계별 소요시간 [{n, label, ms}]. 어디서 시간을 쓰는지
+                          // 추측하지 않고 재기 위한 것 - 페이지 이동을 넘어 유지된다
+    stepStartedAt: 0,     // 지금 단계를 시작한 시각
     openWaitSince: 0,     // 목표 날짜가 열리기를 기다리기 시작한 시각(페이지 이동을 넘어 유지)
     openRetryMs: 1200,    // 목표 날짜가 없을 때 새로고침 간격 (서버 부담 하한)
     openWaitMaxMs: 180000,// 이만큼 기다려도 안 열리면 사람을 부른다
@@ -609,6 +629,26 @@ try {
       try { listeners[i](S); } catch (e) {}
     }
   }
+  /* 단계가 넘어갈 때마다 얼마나 걸렸는지 남긴다.
+   * "30초 걸리는데 줄일 수 있나" 는 어디서 쓰는지 알아야 답할 수 있다. */
+  function markStep(n, label) {
+    var t = Date.now();
+    if (S.stepStartedAt) {
+      if (!S.times) S.times = [];
+      S.times.push({ n: n, label: String(label || '').slice(0, 22), ms: t - S.stepStartedAt });
+    }
+    S.stepStartedAt = t;
+  }
+
+  function timeReport() {
+    var a = (S.times || []).slice();
+    if (!a.length) return '';
+    a.sort(function (x, y) { return y.ms - x.ms; });
+    return '  느린 단계: ' + a.slice(0, 3).map(function (x) {
+      return x.n + '.' + x.label + ' ' + (x.ms / 1000).toFixed(1) + 's';
+    }).join(', ');
+  }
+
   function log(msg) {
     console.log('%c[KE_REC] ' + msg, 'color:#a0f;font-weight:bold');
     S.message = msg;
@@ -727,6 +767,7 @@ try {
     scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
     lastLabel = '';
     S.openWaitSince = 0;
+    S.times = []; S.stepStartedAt = Date.now();
     ensurePhase = 0;
     retries = 0;
     waitingSince = 0;
@@ -737,7 +778,7 @@ try {
    * hud 의 알림 판정이 ★완료★ 대신 ⚠멈춤⚠ 을 내도록 한다. */
   function finish(why, problem) {
     S.problem = !!problem;
-    pause(why);
+    pause(why + timeReport());
   }
 
   function pause(why) {
@@ -861,6 +902,7 @@ try {
           log(how + ' - 화면이 되돌아가므로 ' + (step.restartFrom + 1) + '단계부터 다시 진행합니다');
           return;
         }
+        markStep(S.idx + 1, step.ensure || step.text);
         S.idx++; save();
         log('재생 ' + S.idx + '/' + S.steps.length + ': ' + how + '  [' + secs(elapsed()) + ']');
       };
@@ -1044,11 +1086,13 @@ try {
         return;
       }
       S.openWaitSince = 0;
+    S.times = []; S.stepStartedAt = Date.now();
     }
     if (!el) {
       if (!waitingSince) waitingSince = now;
       /* optional: 이 화면에 아예 없을 수 있는 단계. 기다려보고 없으면 조용히 넘어간다. */
       if (step.optional && !blockedEl && now - waitingSince > (S.optionalMs || 400)) {
+        markStep(S.idx + 1, step.text || step.sel);
         S.idx++; retries = 0; waitingSince = 0; save();
         log('재생 ' + S.idx + '/' + S.steps.length + ': 이 화면에 없어 건너뜀 - '
             + (step.text || step.sel).slice(0, 20) + '  [' + secs(elapsed()) + ']');
@@ -1099,6 +1143,7 @@ try {
       log('스크롤을 20번 눌렀는데도 버튼이 남아 있습니다 - 팝업을 확인하세요');
     }
 
+    markStep(S.idx + 1, step.text || step.sel);
     S.idx++;
     retries = 0;
     save();
@@ -1466,7 +1511,11 @@ try {
    * 연월일이 눈에 보여야 헷갈리지 않는다는 요청. 동시에 연도를 손으로 칠 일이
    * 없어지므로 여행 연도(2027)를 넣어 1년 뒤로 예약되는 사고도 막힌다. */
   function defaultTarget() {
-    var p = kstParts(nowSrv());
+    /* 오늘 09:00 이 이미 지났으면 내일로. 안 그러면 무장하자마자
+     * "이미 지난 시각" 으로 풀려서 왜 안 되는지 헷갈린다. */
+    var t = nowSrv();
+    var p = kstParts(t);
+    if (+p.hour * 3600 + +p.minute * 60 + +p.second >= 9 * 3600) p = kstParts(t + 86400000);
     return p.year + '-' + p.month + '-' + p.day + ' 09:00:00';
   }
 
@@ -1559,6 +1608,17 @@ try {
    * 예약은 localStorage 에 남아 새 문서가 뜰 때 recorder 가 스스로 집어간다. */
   function fire(reason) {
     var R = REC();
+    var U2 = W.KE_UTIL || window.KE_UTIL;
+    /* 로그아웃 상태로 쏘면 로그인 화면만 붙잡고 헛돈다. 매일 자동으로 돌릴 때
+     * 밤새 세션이 풀리는 게 가장 흔한 실패라, 쏘기 전에 확인하고 크게 알린다. */
+    if (U2 && U2.loggedOut && U2.loggedOut()) {
+      S.armed = false;
+      keepAwake(false);
+      save();
+      render();
+      notify('로그인이 풀려 있습니다 - 로그인하고 다시 대기 시작하세요 (발사 취소)', false);
+      return false;
+    }
     if (!R || !R.state.steps.length) {
       toast('녹화된 단계가 없습니다 - 먼저 ● 녹화 하세요', true);
       return false;
@@ -1566,6 +1626,7 @@ try {
     if (!R.armForReload()) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
+    keepAwake(false);
     save();
     toast('발사 (' + reason + ') - 새로고침 후 재생 @ ' + fmtKst(nowSrv()));
     setTimeout(function () { location.reload(); }, 0);
@@ -1586,6 +1647,35 @@ try {
         o.start(ac.currentTime + i * dur); o.stop(ac.currentTime + i * dur + dur * 0.8);
       });
     } catch (e) {}
+  }
+
+  /* 무장 중에는 탭이 소리를 내게 해서 백그라운드 스로틀링을 피한다.
+   *
+   * 크롬은 숨겨진 탭의 타이머를 1초로 묶고, 5분 넘게 숨어 있으면 "집중 스로틀링" 으로
+   * 1분에 한 번꼴까지 늦춘다. 11:15 발사인데 11:00 에 무장하고 다른 창을 보고 있으면
+   * 최악의 경우 1분 늦는다 - 좌석 경쟁에서는 끝난 얘기다.
+   * 소리를 내는 탭은 이 집중 스로틀링에서 면제된다. 완전한 무음은 "소리 없음" 으로
+   * 취급될 수 있어 아주 작은 소리를 낸다(사실상 안 들린다).
+   * 무장을 푸는 순간 멈춘다. */
+  var keepCtx = null, keepOsc = null;
+  function keepAwake(on) {
+    try {
+      if (on) {
+        if (keepOsc) return;
+        keepCtx = keepCtx || new (window.AudioContext || window.webkitAudioContext)();
+        if (keepCtx.state === 'suspended') keepCtx.resume();
+        keepOsc = keepCtx.createOscillator();
+        var g = keepCtx.createGain();
+        g.gain.value = 0.0008;          // 안 들리지만 "무음" 은 아닌 크기
+        keepOsc.frequency.value = 40;   // 낮은 음 - 스피커에서 사실상 안 나온다
+        keepOsc.connect(g); g.connect(keepCtx.destination);
+        keepOsc.start();
+      } else if (keepOsc) {
+        try { keepOsc.stop(); } catch (e) {}
+        keepOsc.disconnect();
+        keepOsc = null;
+      }
+    } catch (e) { keepOsc = null; }
   }
 
   function notify(msg, ok) {
@@ -1645,7 +1735,9 @@ try {
 
     /* 백그라운드 탭은 타이머가 느려진다. 무장 중이면 눈에 띄게 알린다. */
     if (S.armed && document.hidden) {
-      setStatus('⚠ 탭이 백그라운드입니다 - 타이머가 늦어질 수 있으니 이 탭을 앞에 두세요');
+      setStatus(keepOsc
+        ? '탭이 백그라운드지만 소리로 스로틀링을 막는 중 - 그래도 앞에 두는 게 가장 확실합니다'
+        : '⚠ 탭이 백그라운드입니다 - 타이머가 늦어질 수 있으니 이 탭을 앞에 두세요');
     }
   }
 
@@ -1655,14 +1747,14 @@ try {
     /* 예약에 실패하면 무장을 반드시 풀어야 한다. 안 그러면 버튼은 '■ 정지' 인데
      * 타이머는 없는 상태가 되어, 사용자가 무장된 줄 알고 기다리다 놓친다. */
     if (isNaN(T)) {
-      S.armed = false; save(); render();
+      S.armed = false; keepAwake(false); save(); render();
       toast('발사 시각 형식 오류 (예: 09:00) - 무장 해제됨', true);
       setStatus('무장 해제됨 - 발사 시각을 확인하세요');
       return;
     }
     var wait = T - S.leadMs - nowSrv();
     if (wait < 0) {
-      S.armed = false; save(); render();
+      S.armed = false; keepAwake(false); save(); render();
       toast('이미 지난 시각입니다 - 무장 해제됨', true);
       setStatus('무장 해제됨 - 발사 시각이 이미 지났습니다');
       return;
@@ -1908,8 +2000,8 @@ try {
     root.querySelector('#ke-lead').onchange = function (e) { S.leadMs = +e.target.value || 0; save(); };
     root.querySelector('#ke-arm').onclick = function () {
       S.armed = !S.armed; save(); render();
-      if (S.armed) { schedule(); }
-      else { if (timer) clearTimeout(timer); timer = null; setStatus('정지됨'); }
+      if (S.armed) { keepAwake(true); schedule(); }
+      else { if (timer) clearTimeout(timer); timer = null; keepAwake(false); setStatus('정지됨'); }
     };
 
     if (!S.targetKst) { S.targetKst = defaultTarget(); save(); }
@@ -1921,7 +2013,7 @@ try {
      * 이게 없으면 08시에 무장해두고 09시 전에 페이지가 한 번이라도 다시 뜨는 순간
      * (수동 새로고침 / 세션 갱신 / SPA 풀 로드) 타이머만 조용히 사라진다.
      * 버튼은 '■ 정지' 로, 카운트다운은 계속 도는 채로 - 정시에 아무 일도 안 일어난다. */
-    if (S.armed) schedule();
+    if (S.armed) { keepAwake(true); schedule(); }
   }
 
   /* document-start 에 주입되면 body 가 아직 없다. 게다가 SPA 가 화면을 갈아끼우면서

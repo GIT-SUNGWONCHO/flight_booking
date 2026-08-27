@@ -59,7 +59,11 @@
    * 연월일이 눈에 보여야 헷갈리지 않는다는 요청. 동시에 연도를 손으로 칠 일이
    * 없어지므로 여행 연도(2027)를 넣어 1년 뒤로 예약되는 사고도 막힌다. */
   function defaultTarget() {
-    var p = kstParts(nowSrv());
+    /* 오늘 09:00 이 이미 지났으면 내일로. 안 그러면 무장하자마자
+     * "이미 지난 시각" 으로 풀려서 왜 안 되는지 헷갈린다. */
+    var t = nowSrv();
+    var p = kstParts(t);
+    if (+p.hour * 3600 + +p.minute * 60 + +p.second >= 9 * 3600) p = kstParts(t + 86400000);
     return p.year + '-' + p.month + '-' + p.day + ' 09:00:00';
   }
 
@@ -152,6 +156,17 @@
    * 예약은 localStorage 에 남아 새 문서가 뜰 때 recorder 가 스스로 집어간다. */
   function fire(reason) {
     var R = REC();
+    var U2 = W.KE_UTIL || window.KE_UTIL;
+    /* 로그아웃 상태로 쏘면 로그인 화면만 붙잡고 헛돈다. 매일 자동으로 돌릴 때
+     * 밤새 세션이 풀리는 게 가장 흔한 실패라, 쏘기 전에 확인하고 크게 알린다. */
+    if (U2 && U2.loggedOut && U2.loggedOut()) {
+      S.armed = false;
+      keepAwake(false);
+      save();
+      render();
+      notify('로그인이 풀려 있습니다 - 로그인하고 다시 대기 시작하세요 (발사 취소)', false);
+      return false;
+    }
     if (!R || !R.state.steps.length) {
       toast('녹화된 단계가 없습니다 - 먼저 ● 녹화 하세요', true);
       return false;
@@ -159,6 +174,7 @@
     if (!R.armForReload()) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
+    keepAwake(false);
     save();
     toast('발사 (' + reason + ') - 새로고침 후 재생 @ ' + fmtKst(nowSrv()));
     setTimeout(function () { location.reload(); }, 0);
@@ -179,6 +195,35 @@
         o.start(ac.currentTime + i * dur); o.stop(ac.currentTime + i * dur + dur * 0.8);
       });
     } catch (e) {}
+  }
+
+  /* 무장 중에는 탭이 소리를 내게 해서 백그라운드 스로틀링을 피한다.
+   *
+   * 크롬은 숨겨진 탭의 타이머를 1초로 묶고, 5분 넘게 숨어 있으면 "집중 스로틀링" 으로
+   * 1분에 한 번꼴까지 늦춘다. 11:15 발사인데 11:00 에 무장하고 다른 창을 보고 있으면
+   * 최악의 경우 1분 늦는다 - 좌석 경쟁에서는 끝난 얘기다.
+   * 소리를 내는 탭은 이 집중 스로틀링에서 면제된다. 완전한 무음은 "소리 없음" 으로
+   * 취급될 수 있어 아주 작은 소리를 낸다(사실상 안 들린다).
+   * 무장을 푸는 순간 멈춘다. */
+  var keepCtx = null, keepOsc = null;
+  function keepAwake(on) {
+    try {
+      if (on) {
+        if (keepOsc) return;
+        keepCtx = keepCtx || new (window.AudioContext || window.webkitAudioContext)();
+        if (keepCtx.state === 'suspended') keepCtx.resume();
+        keepOsc = keepCtx.createOscillator();
+        var g = keepCtx.createGain();
+        g.gain.value = 0.0008;          // 안 들리지만 "무음" 은 아닌 크기
+        keepOsc.frequency.value = 40;   // 낮은 음 - 스피커에서 사실상 안 나온다
+        keepOsc.connect(g); g.connect(keepCtx.destination);
+        keepOsc.start();
+      } else if (keepOsc) {
+        try { keepOsc.stop(); } catch (e) {}
+        keepOsc.disconnect();
+        keepOsc = null;
+      }
+    } catch (e) { keepOsc = null; }
   }
 
   function notify(msg, ok) {
@@ -238,7 +283,9 @@
 
     /* 백그라운드 탭은 타이머가 느려진다. 무장 중이면 눈에 띄게 알린다. */
     if (S.armed && document.hidden) {
-      setStatus('⚠ 탭이 백그라운드입니다 - 타이머가 늦어질 수 있으니 이 탭을 앞에 두세요');
+      setStatus(keepOsc
+        ? '탭이 백그라운드지만 소리로 스로틀링을 막는 중 - 그래도 앞에 두는 게 가장 확실합니다'
+        : '⚠ 탭이 백그라운드입니다 - 타이머가 늦어질 수 있으니 이 탭을 앞에 두세요');
     }
   }
 
@@ -248,14 +295,14 @@
     /* 예약에 실패하면 무장을 반드시 풀어야 한다. 안 그러면 버튼은 '■ 정지' 인데
      * 타이머는 없는 상태가 되어, 사용자가 무장된 줄 알고 기다리다 놓친다. */
     if (isNaN(T)) {
-      S.armed = false; save(); render();
+      S.armed = false; keepAwake(false); save(); render();
       toast('발사 시각 형식 오류 (예: 09:00) - 무장 해제됨', true);
       setStatus('무장 해제됨 - 발사 시각을 확인하세요');
       return;
     }
     var wait = T - S.leadMs - nowSrv();
     if (wait < 0) {
-      S.armed = false; save(); render();
+      S.armed = false; keepAwake(false); save(); render();
       toast('이미 지난 시각입니다 - 무장 해제됨', true);
       setStatus('무장 해제됨 - 발사 시각이 이미 지났습니다');
       return;
@@ -501,8 +548,8 @@
     root.querySelector('#ke-lead').onchange = function (e) { S.leadMs = +e.target.value || 0; save(); };
     root.querySelector('#ke-arm').onclick = function () {
       S.armed = !S.armed; save(); render();
-      if (S.armed) { schedule(); }
-      else { if (timer) clearTimeout(timer); timer = null; setStatus('정지됨'); }
+      if (S.armed) { keepAwake(true); schedule(); }
+      else { if (timer) clearTimeout(timer); timer = null; keepAwake(false); setStatus('정지됨'); }
     };
 
     if (!S.targetKst) { S.targetKst = defaultTarget(); save(); }
@@ -514,7 +561,7 @@
      * 이게 없으면 08시에 무장해두고 09시 전에 페이지가 한 번이라도 다시 뜨는 순간
      * (수동 새로고침 / 세션 갱신 / SPA 풀 로드) 타이머만 조용히 사라진다.
      * 버튼은 '■ 정지' 로, 카운트다운은 계속 도는 채로 - 정시에 아무 일도 안 일어난다. */
-    if (S.armed) schedule();
+    if (S.armed) { keepAwake(true); schedule(); }
   }
 
   /* document-start 에 주입되면 body 가 아직 없다. 게다가 SPA 가 화면을 갈아끼우면서

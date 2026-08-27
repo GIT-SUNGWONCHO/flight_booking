@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8"><title>매일 반복 / 로그인 확인</title>
+<body style="font:14px sans-serif;padding:20px">
+<!-- ?out=1 이면 로그아웃 상태(로그인 버튼만 보임).
+     매일 자동 시도에서 밤새 세션이 풀리는 게 가장 흔한 실패다. -->
+<div id="nav"></div>
+<button id="date">22 08월 22일 (일)</button>
+<button id="next">다음</button>
+<script>
+var out = new URLSearchParams(location.search).has('out');
+document.getElementById('nav').innerHTML = out
+  ? '<button id="login">로그인</button>'
+  : '<button id="my">마이페이지</button>';
+window.__clicks = 0;
+document.querySelectorAll('#date,#next').forEach(function (b) {
+  b.onclick = function () { window.__clicks++; };
+});
+</script>
+</body>

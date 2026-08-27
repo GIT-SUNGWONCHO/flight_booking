@@ -90,6 +90,20 @@ def main() -> int:
                   f"발사 시각이 연월일까지 채워져 있음 (실제 {v!r})")
             yr = pg.evaluate("new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul'}).format(new Date()).slice(0,4)")
             check(v.startswith(yr), f"연도가 올해로 채워짐 (실제 {v[:4]}, 올해 {yr})")
+
+            # 기본값이 오늘 09:00 이면 이미 지난 시각이라 무장이 바로 풀린다.
+            # 다음 09시로 잡아야 "왜 안 되지" 가 없다.
+            pg.evaluate("() => { window.KE_HUD.state.targetKst=''; window.KE_HUD.save(); }")
+            pg.reload()
+            pg.wait_for_timeout(800)
+            pg.evaluate("document.getElementById('ke-arm').click()")
+            pg.wait_for_timeout(400)
+            check(pg.evaluate("window.KE_HUD.state.armed") is True,
+                  "기본 발사 시각으로 바로 무장됨 (다음 09시)",
+                  pg.evaluate("document.getElementById('ke-status').textContent"))
+
+            # 무장 중에는 소리로 백그라운드 스로틀링을 막는다
+            check(pg.evaluate("!!(window.KE_HUD.state.armed)") , "무장 유지")
         finally:
             ctx.close()
 
