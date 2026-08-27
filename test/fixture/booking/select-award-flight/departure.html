@@ -15,6 +15,23 @@
   </div>
 </div>
 <div id="shown"></div>
+
+<!-- 실측 구조: 날짜칸을 누르면 이 달력이 열린다.
+     #month202708 처럼 컨테이너 id 에 연월이 박혀 있고, 예약 가능한 날에만
+     -available 이 붙는다. 라벨은 "18 18일, 수요일" 로 월이 없다. -->
+<!-- 실측: #flight-widget__btn, 라벨 "항공편 검색" -->
+<button id="flight-widget__btn">항공편 검색</button>
+<div id="picker" style="display:none">
+  <div></div>
+  <div id="month202708">
+    <div></div>
+    <div>
+      <table class="ui-datepicker__table"><tbody class="ui-datepicker__tbody">
+        <tr class="ng-star-inserted"><td></td></tr>
+      </tbody></table>
+    </div>
+  </div>
+</div>
 <div id="seatbox"></div>
 <button id="next">다음</button>
 <script>
@@ -46,6 +63,44 @@
   if (location.search.indexOf('empty=1') >= 0) return;
   /* 실제 화면과 같이, 날짜와 좌석 수는 화면이 아니라 이 응답에서 온다.
      probe 가 이걸 읽어 "지금 어느 날을 보고 있나" 를 판정한다. */
+  /* 예약 가능 창: openTo 일까지만 -available. 09:00 에 하루가 늘어나는 것을 흉내낸다. */
+  var openTo = +(new URLSearchParams(location.search).get('openTo') || 21);
+  var row = document.querySelector('#month202708 tr');
+  row.innerHTML = '';
+  for (var d = 16; d <= 25; d++) {
+    var td = document.createElement('td');
+    td.className = 'ui-datepicker__td' + (d <= openTo ? ' -available' : ' -disabled');
+    td.textContent = d + ' ' + d + '일, 수요일';
+    (function (dd) {
+      td.addEventListener('click', function () {
+        if (!this.classList.contains('-available')) return;
+        /* 실측(2026-08-27): 날짜를 고르면 머리말만 바뀌고 목록은 그대로였다.
+           재조회는 [조회] 를 눌러야 일어난다. */
+        window.__picked = '202708' + dd;
+        document.getElementById('depdate').textContent =
+          '08월 ' + dd + '일 (수)';
+        document.getElementById('picker').style.display = 'none';
+      });
+    })(('0' + d).slice(-2));
+    row.appendChild(td);
+  }
+  document.getElementById('depdate').addEventListener('click', function () {
+    document.getElementById('picker').style.display = '';
+  });
+  // nosearch=1: 조회 버튼 라벨이 우리가 아는 말이 아닌 경우를 흉내낸다
+  // nosearch=1: id 도 라벨도 우리가 아는 것이 아닌 경우
+  if (location.search.indexOf('nosearch=1') >= 0) {
+    var b = document.getElementById('flight-widget__btn');
+    b.id = 'somethingelse';
+    b.textContent = '알 수 없는 버튼';
+  }
+  document.getElementById('flight-widget__btn').addEventListener('click', function () {
+    if (!window.__picked) return;
+    var u = new URL(location.href);
+    u.searchParams.set('depDate', window.__picked);
+    location.href = u.toString();      // 실제로는 XHR 이지만 결과는 같다
+  });
+
   var x = new XMLHttpRequest();
   x.open("GET", "/booking/select-award-flight/awardAvailability.json?d=" + day
                 + "&seats=" + (out ? '1' : '0'));

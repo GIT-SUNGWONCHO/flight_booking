@@ -134,9 +134,15 @@
    * 조회 페이지 주소에는 날짜가 없다(/departure 뿐). 그래서 화면만 보고는 지금
    * 몇 일자를 조회 중인지 확신할 수 없는데, 서버 응답에는 있다. 달력을 건너뛰고
    * 이 페이지에서 시작할 때 "엉뚱한 날 좌석을 누르는" 사고를 막는 유일한 근거다. */
-  function shownDate() {
+  function shownDate(since) {
+    /* since 를 주면 그 시각 이후에 온 응답만 본다.
+     *
+     * 이게 없으면 낡은 응답이 진실을 가린다: 날짜를 바꿔 눌렀는데 재조회가 안 되면
+     * 예전 응답이 그대로 남아, 마치 그 날짜를 조회 중인 것처럼 보인다.
+     * 실측(2026-08-27)에서 정확히 그랬다 - 머리말은 08-18 인데 목록은 08-21 이었다. */
     var tl = seatTimeline();
     for (var i = tl.length - 1; i >= 0; i--) {
+      if (since && tl[i].at < since) continue;
       var d = tl[i].date;                       // YYYYMMDD
       if (d && d.length === 8) return d.slice(4, 6) + '-' + d.slice(6, 8);
     }

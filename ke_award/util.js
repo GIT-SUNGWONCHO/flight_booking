@@ -405,12 +405,65 @@
   var DATEINPUT = 'kds-dateinput, [class*="ui-dateinput__host"], [class*="-dateinput"]';
 
   function searchedDate() {
+    var el = dateInputEl();
+    return el ? monthDay(label(el)) : null;
+  }
+
+  /* 조회 화면의 날짜 선택 달력.
+   *
+   * 실측 구조(2026-08-27):
+   *   #month202708 > … > td.ui-datepicker__td.-available   라벨 "18 18일, 수요일"
+   *
+   * 두 가지가 중요하다:
+   *   - 컨테이너 id 에 연월이 그대로 박혀 있다(month + YYYYMM). 그래서 몇 번째
+   *     칸인지 세지 않아도 목표 날짜를 정확히 집을 수 있다. 화면이 조금 바뀌어도
+   *     버티는 유일한 방법이다.
+   *   - 예약 가능한 날만 -available 이 붙는다. 이게 "그 날짜가 열렸는가" 를 알려주는
+   *     신호다. 09:00 전에는 새로 열릴 날짜에 이게 없다.
+   *
+   * 라벨은 "18 18일, 수요일" 이라 월이 없다. monthDay() 로는 못 읽는다 - 월은
+   * 컨테이너 id 에서 오고 일자만 라벨에서 읽는다. */
+  function findPickerDate(mmdd, year) {
+    var md = monthDay(mmdd);
+    if (!md) return null;
+    var y = year || nextYearFor(md);
+    var box;
+    try { box = document.getElementById('month' + y + md.slice(0, 2)); } catch (e) { return null; }
+    if (!box) return { el: null, available: false, why: '그 달(' + y + md.slice(0, 2) + ') 달력이 화면에 없습니다' };
+    var want = +md.slice(3), tds;
+    try { tds = box.querySelectorAll('td'); } catch (e) { return null; }
+    for (var i = 0; i < tds.length; i++) {
+      var td = tds[i];
+      if (!visible(td)) continue;
+      /* 라벨 앞머리의 숫자가 그 날의 일자다. "18 18일, 수요일" -> 18 */
+      if (parseInt(label(td), 10) !== want) continue;
+      var av = false;
+      try { av = td.classList.contains('-available'); } catch (e) {}
+      return { el: td, available: av,
+               why: av ? '' : md + ' 은(는) 아직 고를 수 없습니다 (예약 가능 창 밖)' };
+    }
+    return { el: null, available: false, why: md + ' 칸을 그 달 달력에서 찾지 못했습니다' };
+  }
+
+  /** 조회 화면의 '가는 날' 입력칸. 눌러야 달력이 열린다.
+   *
+   * 셀렉터가 겹겹이 걸린다: 바깥 감싸개(div.-dateinput)도, 안쪽 실제 칸
+   * (kds-dateinput_1.ui-dateinput__host)도 같이 잡힌다. 바깥을 누르면 안쪽에 붙은
+   * 클릭 핸들러가 안 돌아 달력이 열리지 않는다(실측에서 여기서 막혔다).
+   * 다른 후보를 품고 있지 않은 것 = 가장 안쪽만 남긴다. */
+  function dateInputEl() {
     var els;
     try { els = document.querySelectorAll(DATEINPUT); } catch (e) { return null; }
+    var hit = [];
     for (var i = 0; i < els.length; i++) {
-      if (!visible(els[i])) continue;
-      var md = monthDay(label(els[i]));
-      if (md) return md;
+      if (visible(els[i]) && monthDay(label(els[i]))) hit.push(els[i]);
+    }
+    for (var j = 0; j < hit.length; j++) {
+      var inner = false;
+      for (var k = 0; k < hit.length; k++) {
+        if (k !== j && hit[j].contains(hit[k])) { inner = true; break; }
+      }
+      if (!inner) return hit[j];      // 문서 순서상 첫 번째 = 가는 날
     }
     return null;
   }
@@ -487,7 +540,8 @@
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
-    onDeparture: onDeparture, searchedDate: searchedDate, urlDates: urlDates, retarget: retarget,
+    onDeparture: onDeparture, searchedDate: searchedDate,
+    findPickerDate: findPickerDate, dateInputEl: dateInputEl, urlDates: urlDates, retarget: retarget,
     nextYearFor: nextYearFor,
     alreadyOn: alreadyOn
   };

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.24.0
+// @version      1.25.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -423,12 +423,65 @@ try {
   var DATEINPUT = 'kds-dateinput, [class*="ui-dateinput__host"], [class*="-dateinput"]';
 
   function searchedDate() {
+    var el = dateInputEl();
+    return el ? monthDay(label(el)) : null;
+  }
+
+  /* 조회 화면의 날짜 선택 달력.
+   *
+   * 실측 구조(2026-08-27):
+   *   #month202708 > … > td.ui-datepicker__td.-available   라벨 "18 18일, 수요일"
+   *
+   * 두 가지가 중요하다:
+   *   - 컨테이너 id 에 연월이 그대로 박혀 있다(month + YYYYMM). 그래서 몇 번째
+   *     칸인지 세지 않아도 목표 날짜를 정확히 집을 수 있다. 화면이 조금 바뀌어도
+   *     버티는 유일한 방법이다.
+   *   - 예약 가능한 날만 -available 이 붙는다. 이게 "그 날짜가 열렸는가" 를 알려주는
+   *     신호다. 09:00 전에는 새로 열릴 날짜에 이게 없다.
+   *
+   * 라벨은 "18 18일, 수요일" 이라 월이 없다. monthDay() 로는 못 읽는다 - 월은
+   * 컨테이너 id 에서 오고 일자만 라벨에서 읽는다. */
+  function findPickerDate(mmdd, year) {
+    var md = monthDay(mmdd);
+    if (!md) return null;
+    var y = year || nextYearFor(md);
+    var box;
+    try { box = document.getElementById('month' + y + md.slice(0, 2)); } catch (e) { return null; }
+    if (!box) return { el: null, available: false, why: '그 달(' + y + md.slice(0, 2) + ') 달력이 화면에 없습니다' };
+    var want = +md.slice(3), tds;
+    try { tds = box.querySelectorAll('td'); } catch (e) { return null; }
+    for (var i = 0; i < tds.length; i++) {
+      var td = tds[i];
+      if (!visible(td)) continue;
+      /* 라벨 앞머리의 숫자가 그 날의 일자다. "18 18일, 수요일" -> 18 */
+      if (parseInt(label(td), 10) !== want) continue;
+      var av = false;
+      try { av = td.classList.contains('-available'); } catch (e) {}
+      return { el: td, available: av,
+               why: av ? '' : md + ' 은(는) 아직 고를 수 없습니다 (예약 가능 창 밖)' };
+    }
+    return { el: null, available: false, why: md + ' 칸을 그 달 달력에서 찾지 못했습니다' };
+  }
+
+  /** 조회 화면의 '가는 날' 입력칸. 눌러야 달력이 열린다.
+   *
+   * 셀렉터가 겹겹이 걸린다: 바깥 감싸개(div.-dateinput)도, 안쪽 실제 칸
+   * (kds-dateinput_1.ui-dateinput__host)도 같이 잡힌다. 바깥을 누르면 안쪽에 붙은
+   * 클릭 핸들러가 안 돌아 달력이 열리지 않는다(실측에서 여기서 막혔다).
+   * 다른 후보를 품고 있지 않은 것 = 가장 안쪽만 남긴다. */
+  function dateInputEl() {
     var els;
     try { els = document.querySelectorAll(DATEINPUT); } catch (e) { return null; }
+    var hit = [];
     for (var i = 0; i < els.length; i++) {
-      if (!visible(els[i])) continue;
-      var md = monthDay(label(els[i]));
-      if (md) return md;
+      if (visible(els[i]) && monthDay(label(els[i]))) hit.push(els[i]);
+    }
+    for (var j = 0; j < hit.length; j++) {
+      var inner = false;
+      for (var k = 0; k < hit.length; k++) {
+        if (k !== j && hit[j].contains(hit[k])) { inner = true; break; }
+      }
+      if (!inner) return hit[j];      // 문서 순서상 첫 번째 = 가는 날
     }
     return null;
   }
@@ -505,7 +558,8 @@ try {
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
-    onDeparture: onDeparture, searchedDate: searchedDate, urlDates: urlDates, retarget: retarget,
+    onDeparture: onDeparture, searchedDate: searchedDate,
+    findPickerDate: findPickerDate, dateInputEl: dateInputEl, urlDates: urlDates, retarget: retarget,
     nextYearFor: nextYearFor,
     alreadyOn: alreadyOn
   };
@@ -523,7 +577,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.24.0', hash: '1991b35' };
+  var B = { version: '1.25.0', hash: '1849528' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -670,9 +724,15 @@ try {
    * 조회 페이지 주소에는 날짜가 없다(/departure 뿐). 그래서 화면만 보고는 지금
    * 몇 일자를 조회 중인지 확신할 수 없는데, 서버 응답에는 있다. 달력을 건너뛰고
    * 이 페이지에서 시작할 때 "엉뚱한 날 좌석을 누르는" 사고를 막는 유일한 근거다. */
-  function shownDate() {
+  function shownDate(since) {
+    /* since 를 주면 그 시각 이후에 온 응답만 본다.
+     *
+     * 이게 없으면 낡은 응답이 진실을 가린다: 날짜를 바꿔 눌렀는데 재조회가 안 되면
+     * 예전 응답이 그대로 남아, 마치 그 날짜를 조회 중인 것처럼 보인다.
+     * 실측(2026-08-27)에서 정확히 그랬다 - 머리말은 08-18 인데 목록은 08-21 이었다. */
     var tl = seatTimeline();
     for (var i = tl.length - 1; i >= 0; i--) {
+      if (since && tl[i].at < since) continue;
       var d = tl[i].date;                       // YYYYMMDD
       if (d && d.length === 8) return d.slice(4, 6) + '-' + d.slice(6, 8);
     }
@@ -924,6 +984,15 @@ try {
     baseLink: '',         // 달력 페이지 주소. 바로 시작이 튕겼을 때 되돌아갈 곳
     deepLinkDate: '',
     pickedDate: '',       // 달력에서 방금 고른 날 (MM-DD). deepLinkDate 의 재료
+    /* 조회 화면에서 시작할 때, 화면 날짜를 목표 날짜로 바꿔야 하면 여기에 담긴다.
+     * 좌석 단계로 넘어가기 전에 이걸 먼저 해결한다. 09:00 에 새로 열리는 날짜는
+     * 미리 맞춰둘 수 없으므로(그 시각에야 예약 가능 창에 들어온다) 이 과정이 있어야
+     * 조회 화면 모드가 09:00 경쟁에 쓸 수 있게 된다. */
+    fixDate: '',          // 맞춰야 할 목표 날짜 (MM-DD)
+    fixPhase: 0,          // 0=달력 열기 1=날짜 누르기 2=서버 응답으로 확인
+    fixSince: 0,
+    fixClickAt: 0,        // 날짜를 누른 시각. 이후에 온 응답만 근거로 삼는다
+    fixSearchAt: 0,       // 조회 버튼을 누른 시각
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
     bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
@@ -1220,6 +1289,7 @@ try {
     scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
     lastLabel = '';
     S.openWaitSince = 0;
+    S.fixSince = 0; S.fixPhase = 0;
     S.times = []; S.stepStartedAt = Date.now();
     ensurePhase = 0;
     retries = 0;
@@ -1245,8 +1315,11 @@ try {
   /* "새로고침한 다음 처음부터 재생" 예약. 지금 당장은 재생하지 않는다.
    * play() 를 먼저 부르면 tick 이 낡은 화면에서 1단계를 눌러버리고, 이어지는
    * 새로고침이 그 결과를 통째로 날린다 (정시 발사 때 날짜 선택이 사라지는 사고). */
-  function armForReload(startIdx) {
+  function armForReload(startIdx, fixDate) {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return false; }
+    S.fixDate = fixDate || '';
+    S.fixPhase = 0;
+    S.fixSince = 0;
     S.recording = false;
     S.playing = false;
     S.idx = 0;
@@ -1261,8 +1334,9 @@ try {
     return true;
   }
   /* 시작 단계를 받는다. 조회 화면 모드는 달력 단계를 건너뛰고 그 뒤부터 시작한다. */
-  function reset(from) {
+  function reset(from, fixDate) {
     S.idx = from > 0 ? from : 0;
+    if (arguments.length > 1) { S.fixDate = fixDate || ''; S.fixPhase = 0; S.fixSince = 0; }
     save();
     log(S.idx ? ((S.idx + 1) + '단계로') : '처음 단계로');
   }
@@ -1296,6 +1370,115 @@ try {
     return null;
   }
 
+  /* 조회 화면의 날짜를 목표 날짜로 맞춘다. 끝났으면 true.
+   *
+   * 실측 구조(2026-08-27): 날짜칸(kds-dateinput)을 누르면 달력이 열리고,
+   * #month202708 안의 td 가 각 날이다. 예약 가능한 날에만 -available 이 붙는다.
+   *
+   * 화면을 믿지 않는다. 마지막에 서버 응답(probe.shownDate)이 목표 날짜를 말해야
+   * 통과시킨다. 그래서 칸을 조금 넓게 찾아도 엉뚱한 날 예매로 이어지지 않는다.
+   * 확인이 안 되면 무엇이 안 됐는지 그대로 말하고 멈춘다. */
+  function fixScreenDate(now) {
+    var P = W.KE_PROBE || window.KE_PROBE;
+    var want = S.fixDate;
+    if (!S.fixSince) { S.fixSince = now; S.fixPhase = 0; }
+
+    /* 날짜를 누른 뒤에는 "그 뒤에 온 응답" 만 근거로 삼는다. 낡은 응답을 그대로
+     * 믿으면, 재조회가 안 됐는데도 맞은 줄 알고 엉뚱한 날 좌석을 누른다. */
+    var seen = S.fixClickAt
+      ? (P && P.shownDate && P.shownDate(S.fixClickAt)) || null
+      : (P && P.shownDate && P.shownDate()) || U.searchedDate();
+    if (seen === want) {                       // 이미 맞다 - 할 일이 없다
+      S.fixDate = ''; S.fixSince = 0; S.fixPhase = 0;
+      S.fixClickAt = 0; S.fixSearchAt = 0; save();
+      log('조회 날짜가 ' + want + ' 로 맞춰졌습니다  [' + secs(elapsed()) + ']');
+      return true;
+    }
+    if (now - S.fixSince > S.openWaitMaxMs) {
+      finish('조회 화면을 ' + want + ' 로 바꾸지 못했습니다 ('
+             + (S.fixPhase === 0 ? '달력을 열지 못함'
+                : S.fixPhase === 1 ? '그 날짜 칸을 누르지 못함'
+                : S.fixSearchAt === -1 ? '날짜는 바꿨는데 조회 버튼을 못 찾음'
+                : '날짜와 조회를 눌렀는데 목록이 안 바뀜')
+             + ') - 화면을 확인하세요', true);
+      return false;
+    }
+    if (now - lastClickAt < S.gapMs) return false;
+
+    if (S.fixPhase === 0) {                    // 달력 열기
+      var input = U.dateInputEl();
+      if (!input) return false;
+      var probe0 = U.findPickerDate(want);
+      if (probe0 && probe0.el) { S.fixPhase = 1; save(); return false; }  // 이미 열려 있다
+      U.fireClick(input);
+      lastClickAt = now;
+      S.fixPhase = 1; save();
+      log('조회 날짜를 바꾸려고 달력을 엽니다 (목표 ' + want + ')');
+      return false;
+    }
+
+    if (S.fixPhase === 1) {                    // 목표 날짜 누르기
+      var r = U.findPickerDate(want);
+      if (!r || !r.el) return false;           // 아직 안 그려졌다 - 기다린다
+      if (!r.available) {
+        /* 09:00 직전이면 아직 예약 가능 창 밖이다. 곧 열리므로 기다린다. */
+        return false;
+      }
+      U.fireClick(r.el);
+      lastClickAt = now;
+      S.fixClickAt = now;
+      S.fixPhase = 2; save();
+      log(want + ' 을(를) 눌렀습니다 - 조회가 갱신되기를 기다립니다');
+      return false;
+    }
+
+    /* 2단계: 눌렀는데 서버가 아직 그 날짜를 말하지 않는다.
+     *
+     * 실측(2026-08-27): 달력에서 날짜를 고르면 머리말만 바뀌고 목록은 그대로였다.
+     * 즉 날짜 선택만으로는 다시 조회되지 않고 조회 버튼을 눌러야 한다.
+     * 잠깐 기다려보고(자동으로 되는 화면일 수도 있다) 안 되면 그 버튼을 찾아 누른다. */
+    if (now - S.fixClickAt > S.retryClickMs
+        && (!S.fixSearchAt || now - S.fixSearchAt > S.retryClickMs * 2)) {
+      var btn = findSearchButton();
+      if (btn) {
+        U.fireClick(btn);
+        lastClickAt = now;
+        S.fixSearchAt = now;
+        save();
+        log('조회가 갱신되지 않아 [' + U.label(btn).slice(0, 12) + '] 을(를) 누릅니다');
+        return false;
+      }
+      if (!S.fixSearchAt) {
+        S.fixSearchAt = -1;   // 못 찾았다는 표시 - 멈출 때 이유에 쓴다
+        save();
+      }
+    }
+
+    return false;
+  }
+
+  /* 조회 화면에서 '다시 조회' 에 해당하는 버튼. 날짜만 바꾸면 목록이 안 바뀐다.
+   *
+   * 실측(2026-08-27): #flight-widget__btn, 라벨 "항공편 검색".
+   * id 를 먼저 본다 - 라벨은 문구가 바뀌면 놓치고, 실제로 "항공편 조회" 로 넣어뒀다가
+   * "항공편 검색" 을 못 찾은 적이 있다. 라벨은 id 가 바뀌었을 때를 위한 보험이다.
+   *
+   * 눌러도 되는지는 그 뒤 서버 응답으로 확인하므로 조금 넓게 잡아도 된다. */
+  var SEARCH_SEL = '#flight-widget__btn';
+  var SEARCHY = /^(항공편\s*)?(조회|검색|재조회)$/;
+  function findSearchButton() {
+    var byId = U.findEl(SEARCH_SEL, '');
+    if (byId && U.visible(byId) && U.hittable(byId)) return byId;
+    var all = U.candidates(document);
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (U.inChrome(el) || !U.visible(el) || !U.hittable(el)) continue;
+      var t = U.label(el).trim();
+      if (t.length <= 12 && SEARCHY.test(t)) return el;
+    }
+    return null;
+  }
+
   function tick() {
     if (!S.playing) return;
     /* 문서가 아직 파싱 중이면 요소는 이미 DOM 에 있어도 그 페이지의 스크립트가
@@ -1304,6 +1487,8 @@ try {
     if (document.readyState === 'loading') return;
     var now = Date.now();
     if (now - lastClickAt < S.gapMs) return;
+
+    if (S.fixDate && !fixScreenDate(now)) return;
 
     var step = S.steps[S.idx];
     if (!step) { pause('전체 단계 완료'); return; }
@@ -2181,17 +2366,13 @@ try {
     /* 띠에 있어도 지금 보고 있는 날이 아니면 눌러서 바꿔야 하는데, 그 날짜 띠를
      * 누르는 단계가 아직 없다. 그대로 진행하면 엉뚱한 날 좌석을 누른다.
      * 3초 벌자고 낼 값이 아니므로, 그 단계가 생기기 전까지는 달력으로 간다. */
-    /* 날짜가 다르면 눌러서 바꿔야 하는데, 그 단계가 없다. 그대로 진행하면 엉뚱한
-     * 날 좌석을 누른다 - 몇 초 벌자고 낼 값이 아니다.
+    /* 09:00 에 새로 열리는 날짜는 미리 맞춰둘 수 없다 - 그 시각에야 예약 가능 창에
+     * 들어오기 때문이다. 그래서 화면 날짜가 목표와 다른 것이 정상이고, 새로고침한
+     * 뒤 화면의 달력에서 목표 날짜를 눌러 맞춘다(fixDate).
      *
-     * 한때 "09:00 전에 조회 화면을 목표 날짜로 맞춰두면 된다" 고 생각했는데 틀렸다.
-     * 새로 열리는 날짜는 09:00 에야 예약 가능 창에 들어오므로, 08:59 에는 그 날을
-     * 고를 수조차 없다. 그래서 이 모드는 아직 09:00 경쟁에는 못 쓴다 -
-     * 조회 화면의 날짜 띠를 눌러 바꾸는 단계가 있어야 완성된다. */
+     * 화면을 믿지 않는다 - 맞췄는지는 서버 응답으로 확인한다. */
     if (seen !== st.expectDate) {
-      return { why: '이 화면은 ' + seen + ' 인데 목표는 ' + st.expectDate + ' 입니다'
-                    + ' - 이 모드는 아직 화면의 날짜를 바꾸지 못합니다.'
-                    + ' 09:00 에는 [달력] 모드를 쓰세요' };
+      return { inPlace: true, from: from, seen: seen, fix: st.expectDate, why: '' };
     }
     return { inPlace: true, from: from, seen: seen, why: '' };
   }
@@ -2209,8 +2390,9 @@ try {
     }
     var p = skipPlan(R);
     return p.inPlace
-      ? { ok: true, text: '준비됨 - 이 조회 화면(' + p.seen + ')에서 새로고침, '
-                          + (p.from + 1) + '단계부터' }
+      ? { ok: true, text: '준비됨 - 이 조회 화면(' + p.seen + ')에서 새로고침'
+                          + (p.fix ? ' → 달력에서 ' + p.fix + ' 선택' : '')
+                          + ' → ' + (p.from + 1) + '단계부터' }
       : { ok: false, text: p.why };
   }
 
@@ -2222,7 +2404,10 @@ try {
   function startPlan(R) {
     if (S.startAt !== 'departure') return { from: 0, why: '' };
     var p = skipPlan(R);
-    return p.inPlace ? { from: p.from, why: '', inPlace: true } : { from: 0, why: p.why };
+    /* 필요한 값을 골라 담지 말고 그대로 넘긴다. 예전에는 여기서 fix(맞춰야 할
+     * 날짜)를 떨어뜨려, 패널은 "달력에서 08-22 선택" 이라고 하는데 정작 발사하면
+     * 날짜를 안 바꾸고 어제 날짜로 좌석을 눌렀다. */
+    return p.inPlace ? p : { from: 0, why: p.why };
   }
 
   function fire(reason) {
@@ -2247,7 +2432,7 @@ try {
     /* 조회 화면 모드인데 조건이 안 맞으면 조용히 넘어가지 않는다. 이유를 말하고
      * 달력 경로로 간다 - 오늘 실측만큼 걸릴 뿐, 놓치지는 않는다. */
     var plan = startPlan(R);
-    if (!R.armForReload(plan.from)) return false;
+    if (!R.armForReload(plan.from, plan.fix)) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
     keepAwake(false);
@@ -2563,7 +2748,7 @@ try {
       '<label><b>시작 화면</b> - 발사할 때 이 화면에 서 있어야 합니다</label>' +
       '<select id="ke-startat">' +
       '<option value="calendar">달력 (기본, 검증됨) - 새로 열린 날짜를 찾아서 조회</option>' +
-      '<option value="departure">조회 화면 (미완성 - 09:00 에는 쓰지 마세요)</option>' +
+      '<option value="departure">조회 화면 (실험 중) - 달력 한 장을 건너뜀</option>' +
       '</select>' +
       '<div id="ke-skipcal-why" style="margin:2px 0 0 2px"></div>' +
       '<div style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
@@ -2635,8 +2820,8 @@ try {
         if (R.state.idx > plan.from && R.state.idx < R.state.steps.length) {
           if (confirm(R.state.idx + '단계까지 진행돼 있습니다.\n확인=이어서, 취소=처음부터')) {
             /* 이어서 */
-          } else { R.reset(plan.from); }
-        } else { R.reset(plan.from); }
+          } else { R.reset(plan.from, plan.fix); }
+        } else { R.reset(plan.from, plan.fix); }
         R.play();
         if (plan.from > 0) toast((plan.from + 1) + '단계부터 재생합니다 (조회 화면 모드)');
         renderRec();
@@ -2806,7 +2991,7 @@ try {
   }, true);
 
   expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount, save: save, schedule: schedule,
-    render: renderRec,
+    render: renderRec, startPlan: function () { return startPlan(REC()); },
                      targetMs: targetMs,
                      rehearse: rehearse,
                      offset: function () { return offsetMs; } });

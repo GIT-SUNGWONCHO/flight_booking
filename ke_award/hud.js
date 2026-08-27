@@ -231,17 +231,13 @@
     /* 띠에 있어도 지금 보고 있는 날이 아니면 눌러서 바꿔야 하는데, 그 날짜 띠를
      * 누르는 단계가 아직 없다. 그대로 진행하면 엉뚱한 날 좌석을 누른다.
      * 3초 벌자고 낼 값이 아니므로, 그 단계가 생기기 전까지는 달력으로 간다. */
-    /* 날짜가 다르면 눌러서 바꿔야 하는데, 그 단계가 없다. 그대로 진행하면 엉뚱한
-     * 날 좌석을 누른다 - 몇 초 벌자고 낼 값이 아니다.
+    /* 09:00 에 새로 열리는 날짜는 미리 맞춰둘 수 없다 - 그 시각에야 예약 가능 창에
+     * 들어오기 때문이다. 그래서 화면 날짜가 목표와 다른 것이 정상이고, 새로고침한
+     * 뒤 화면의 달력에서 목표 날짜를 눌러 맞춘다(fixDate).
      *
-     * 한때 "09:00 전에 조회 화면을 목표 날짜로 맞춰두면 된다" 고 생각했는데 틀렸다.
-     * 새로 열리는 날짜는 09:00 에야 예약 가능 창에 들어오므로, 08:59 에는 그 날을
-     * 고를 수조차 없다. 그래서 이 모드는 아직 09:00 경쟁에는 못 쓴다 -
-     * 조회 화면의 날짜 띠를 눌러 바꾸는 단계가 있어야 완성된다. */
+     * 화면을 믿지 않는다 - 맞췄는지는 서버 응답으로 확인한다. */
     if (seen !== st.expectDate) {
-      return { why: '이 화면은 ' + seen + ' 인데 목표는 ' + st.expectDate + ' 입니다'
-                    + ' - 이 모드는 아직 화면의 날짜를 바꾸지 못합니다.'
-                    + ' 09:00 에는 [달력] 모드를 쓰세요' };
+      return { inPlace: true, from: from, seen: seen, fix: st.expectDate, why: '' };
     }
     return { inPlace: true, from: from, seen: seen, why: '' };
   }
@@ -259,8 +255,9 @@
     }
     var p = skipPlan(R);
     return p.inPlace
-      ? { ok: true, text: '준비됨 - 이 조회 화면(' + p.seen + ')에서 새로고침, '
-                          + (p.from + 1) + '단계부터' }
+      ? { ok: true, text: '준비됨 - 이 조회 화면(' + p.seen + ')에서 새로고침'
+                          + (p.fix ? ' → 달력에서 ' + p.fix + ' 선택' : '')
+                          + ' → ' + (p.from + 1) + '단계부터' }
       : { ok: false, text: p.why };
   }
 
@@ -272,7 +269,10 @@
   function startPlan(R) {
     if (S.startAt !== 'departure') return { from: 0, why: '' };
     var p = skipPlan(R);
-    return p.inPlace ? { from: p.from, why: '', inPlace: true } : { from: 0, why: p.why };
+    /* 필요한 값을 골라 담지 말고 그대로 넘긴다. 예전에는 여기서 fix(맞춰야 할
+     * 날짜)를 떨어뜨려, 패널은 "달력에서 08-22 선택" 이라고 하는데 정작 발사하면
+     * 날짜를 안 바꾸고 어제 날짜로 좌석을 눌렀다. */
+    return p.inPlace ? p : { from: 0, why: p.why };
   }
 
   function fire(reason) {
@@ -297,7 +297,7 @@
     /* 조회 화면 모드인데 조건이 안 맞으면 조용히 넘어가지 않는다. 이유를 말하고
      * 달력 경로로 간다 - 오늘 실측만큼 걸릴 뿐, 놓치지는 않는다. */
     var plan = startPlan(R);
-    if (!R.armForReload(plan.from)) return false;
+    if (!R.armForReload(plan.from, plan.fix)) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
     keepAwake(false);
@@ -613,7 +613,7 @@
       '<label><b>시작 화면</b> - 발사할 때 이 화면에 서 있어야 합니다</label>' +
       '<select id="ke-startat">' +
       '<option value="calendar">달력 (기본, 검증됨) - 새로 열린 날짜를 찾아서 조회</option>' +
-      '<option value="departure">조회 화면 (미완성 - 09:00 에는 쓰지 마세요)</option>' +
+      '<option value="departure">조회 화면 (실험 중) - 달력 한 장을 건너뜀</option>' +
       '</select>' +
       '<div id="ke-skipcal-why" style="margin:2px 0 0 2px"></div>' +
       '<div style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
@@ -685,8 +685,8 @@
         if (R.state.idx > plan.from && R.state.idx < R.state.steps.length) {
           if (confirm(R.state.idx + '단계까지 진행돼 있습니다.\n확인=이어서, 취소=처음부터')) {
             /* 이어서 */
-          } else { R.reset(plan.from); }
-        } else { R.reset(plan.from); }
+          } else { R.reset(plan.from, plan.fix); }
+        } else { R.reset(plan.from, plan.fix); }
         R.play();
         if (plan.from > 0) toast((plan.from + 1) + '단계부터 재생합니다 (조회 화면 모드)');
         renderRec();
@@ -856,7 +856,7 @@
   }, true);
 
   expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount, save: save, schedule: schedule,
-    render: renderRec,
+    render: renderRec, startPlan: function () { return startPlan(REC()); },
                      targetMs: targetMs,
                      rehearse: rehearse,
                      offset: function () { return offsetMs; } });
