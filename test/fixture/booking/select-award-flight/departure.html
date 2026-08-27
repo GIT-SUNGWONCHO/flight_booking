@@ -23,7 +23,9 @@
   window.__loads = (+sessionStorage.getItem('loads') || 0) + 1;
   sessionStorage.setItem('loads', window.__loads);
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[id]'); if (t) window.__clicks.push(t.id);
+    // 우리 패널(ke-*)을 누른 것은 페이지 조작이 아니다 - 세지 않는다
+    var t = e.target.closest('[id]');
+    if (t && t.id.indexOf('ke-') !== 0) window.__clicks.push(t.id);
   }, true);
   /* opensAfter=N: 좌석이 N번째 로드부터 나타난다. 09:00 정각에 새로고침해도
      서버가 좌석을 조금 늦게 푸는 상황을 흉내낸다. */

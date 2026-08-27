@@ -189,6 +189,33 @@ def main() -> int:
             check("준비됨" in why(),
                   "좌석이 아직 없어도 '이 날짜로 대기 중' 이면 준비된 것이다", why())
 
+            # ---------- 손으로 ▶ 재생 을 눌러도 같은 곳에서 시작한다 ----------
+            # 실측(2026-08-27): 조회 화면 모드로 해놓고 ▶ 재생 을 눌렀더니 1단계
+            # (달력 날짜 클릭)부터 돌아, 조회 화면에 있지도 않은 dep-fare- 셀을
+            # 20초 동안 찾다 멈췄다. 사람이 시험해보는 가장 자연스러운 경로가 그것이다.
+            land(DEP + "?depDate=20270821", fresh_loads=True)
+            setup("08-21")
+            pg.evaluate("() => { KE_REC.state.stepTimeoutMs = 3000; KE_REC.save(); }")
+            pg.click("#ke-play")
+            pg.wait_for_function("() => (window.__clicks||[]).includes('next')", timeout=20000)
+            clicked = pg.evaluate("window.__clicks || []")
+            check(clicked[:2] == ["seat", "next"],
+                  f"▶ 재생 도 3단계부터 시작한다 (실제 {clicked})")
+            check(pg.evaluate("KE_REC.state.problem") is False,
+                  "1단계를 찾다 멈추지 않는다",
+                  str(pg.evaluate("KE_REC.state.message")))
+
+            # 조건이 안 맞으면 헛돌리지 말고 이유를 말한다
+            land(CAL)
+            pg.evaluate("() => { KE_HUD.state.startAt = 'departure'; KE_HUD.save();"
+                        " KE_REC.state.idx = 0; KE_REC.save(); }")
+            pg.click("#ke-play")
+            pg.wait_for_timeout(600)
+            check(pg.evaluate("KE_REC.state.playing") is False,
+                  "조회 화면이 아니면 ▶ 재생 이 헛돌지 않는다")
+            toast = pg.evaluate("document.getElementById('ke-toast')?.textContent || ''")
+            check("조회 화면에서 시작할 수 없습니다" in toast, "왜 안 되는지 말해준다", toast)
+
             # ---------- 09:00 정각: 좌석이 조금 늦게 열린다 ----------
             # 정각에 새로고침해도 서버가 좌석을 몇 백 밀리초 늦게 푸는 경우가 있다.
             # 여기서 20초를 기다리다 포기하면 그날 좌석은 그대로 날아간다.

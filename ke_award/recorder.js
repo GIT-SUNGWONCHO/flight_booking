@@ -427,7 +427,12 @@
                    : '새로고침 후 처음부터 재생 예약됨');
     return true;
   }
-  function reset() { S.idx = 0; save(); log('처음 단계로'); }
+  /* 시작 단계를 받는다. 조회 화면 모드는 달력 단계를 건너뛰고 그 뒤부터 시작한다. */
+  function reset(from) {
+    S.idx = from > 0 ? from : 0;
+    save();
+    log(S.idx ? ((S.idx + 1) + '단계로') : '처음 단계로');
+  }
   /* '삭제' 는 빈 상태로 두는 것보다 내장본으로 되돌리는 게 쓸모 있다.
    * 녹화가 꼬였을 때 되돌아갈 기준점이 생긴다. */
   function clear() {

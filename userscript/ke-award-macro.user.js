@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.22.0
+// @version      1.23.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -523,7 +523,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.22.0', hash: '65921fa' };
+  var B = { version: '1.23.0', hash: 'f1dcb49' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -1260,7 +1260,12 @@ try {
                    : '새로고침 후 처음부터 재생 예약됨');
     return true;
   }
-  function reset() { S.idx = 0; save(); log('처음 단계로'); }
+  /* 시작 단계를 받는다. 조회 화면 모드는 달력 단계를 건너뛰고 그 뒤부터 시작한다. */
+  function reset(from) {
+    S.idx = from > 0 ? from : 0;
+    save();
+    log(S.idx ? ((S.idx + 1) + '단계로') : '처음 단계로');
+  }
   /* '삭제' 는 빈 상태로 두는 것보다 내장본으로 되돌리는 게 쓸모 있다.
    * 녹화가 꼬였을 때 되돌아갈 기준점이 생긴다. */
   function clear() {
@@ -2208,6 +2213,17 @@ try {
       : { ok: false, text: p.why };
   }
 
+  /* 이 모드에서 재생은 몇 단계부터 시작해야 하는가.
+   *
+   * 예전에는 이 판단이 fire() 안에만 있었다. 그래서 조회 화면 모드로 해놓고 ▶ 재생 을
+   * 누르면 1단계(달력 날짜 클릭)부터 돌아, 달력에도 없는 셀을 20초 동안 찾다 멈췄다.
+   * 사람이 시험해보는 가장 자연스러운 경로가 바로 그것이다. 한 곳에서 정한다. */
+  function startPlan(R) {
+    if (S.startAt !== 'departure') return { from: 0, why: '' };
+    var p = skipPlan(R);
+    return p.inPlace ? { from: p.from, why: '', inPlace: true } : { from: 0, why: p.why };
+  }
+
   function fire(reason) {
     var R = REC();
     var U2 = W.KE_UTIL || window.KE_UTIL;
@@ -2229,8 +2245,8 @@ try {
      * 조건이 안 맞으면 이유를 알리고 원래대로 달력부터 - 조용히 건너뛰지 않는다. */
     /* 조회 화면 모드인데 조건이 안 맞으면 조용히 넘어가지 않는다. 이유를 말하고
      * 달력 경로로 간다 - 오늘 실측만큼 걸릴 뿐, 놓치지는 않는다. */
-    var plan = S.startAt === 'departure' ? skipPlan(R) : { why: '' };
-    if (!R.armForReload(plan.inPlace ? plan.from : 0)) return false;
+    var plan = startPlan(R);
+    if (!R.armForReload(plan.from)) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
     keepAwake(false);
@@ -2605,16 +2621,23 @@ try {
         renderRec();
       };
       root.querySelector('#ke-play').onclick = function () {
-        if (R.state.playing) { R.pause('사용자 중지'); }
-        else {
-          // 처음부터 다시 할지, 끊긴 데서 이어갈지
-          if (R.state.idx > 0 && R.state.idx < R.state.steps.length) {
-            if (confirm(R.state.idx + '단계까지 진행돼 있습니다.\n확인=이어서, 취소=처음부터')) {
-              /* 이어서 */
-            } else { R.reset(); }
-          } else { R.reset(); }
-          R.play();
+        if (R.state.playing) { R.pause('사용자 중지'); renderRec(); return; }
+        var plan = startPlan(R);
+        if (S.startAt === 'departure' && !plan.inPlace) {
+          /* 여기서 그냥 1단계부터 돌리면 달력에도 없는 셀을 20초 동안 찾다 멈춘다.
+           * 왜 못 하는지 말해주는 편이 훨씬 낫다. */
+          toast('조회 화면에서 시작할 수 없습니다: ' + plan.why, true);
+          renderRec();
+          return;
         }
+        // 처음부터 다시 할지, 끊긴 데서 이어갈지
+        if (R.state.idx > plan.from && R.state.idx < R.state.steps.length) {
+          if (confirm(R.state.idx + '단계까지 진행돼 있습니다.\n확인=이어서, 취소=처음부터')) {
+            /* 이어서 */
+          } else { R.reset(plan.from); }
+        } else { R.reset(plan.from); }
+        R.play();
+        if (plan.from > 0) toast((plan.from + 1) + '단계부터 재생합니다 (조회 화면 모드)');
         renderRec();
       };
       root.querySelector('#ke-edit').onclick = function () {
