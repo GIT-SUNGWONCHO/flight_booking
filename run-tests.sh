@@ -24,95 +24,105 @@ reset_browsers() {
 
 stage() { printf '\n\033[36m%s\033[0m\n' "$1"; }
 
-stage "[1/23] 라벨 판정 유닛테스트"
+stage "[1/26] 라벨 판정 유닛테스트"
 node test/test_autoconfirm.js
 
-stage "[2/23] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트"
+stage "[2/26] 유틸(날짜 자동감지/접두어 매칭) 유닛테스트"
 node test/test_util.js
 
-stage "[3/23] 유저스크립트 빌드"
+stage "[3/26] 유저스크립트 빌드"
 node build.mjs
 node --check userscript/ke-award-macro.user.js
 
 reset_browsers
-stage "[4/23] 브라우저 통합테스트"
+stage "[4/26] 브라우저 통합테스트"
 "$PY" test/test_integration.py
 
 reset_browsers
-stage "[5/23] 유저스크립트(HUD) 테스트"
+stage "[5/26] 유저스크립트(HUD) 테스트"
 "$PY" test/test_hud.py
 
 reset_browsers
-stage "[6/23] 녹화/재생 테스트"
+stage "[6/26] 녹화/재생 테스트"
 "$PY" test/test_recorder.py
 
 reset_browsers
-stage "[7/23] 단계 편집 테스트"
+stage "[7/26] 단계 편집 테스트"
 "$PY" test/test_editor.py
 
 reset_browsers
-stage "[8/23] 단계 우선순위 테스트"
+stage "[8/26] 단계 우선순위 테스트"
 "$PY" test/test_precedence.py
 
 reset_browsers
-stage "[9/23] 건너뜀 보고 / 추측클릭 제거 확인"
+stage "[9/26] 건너뜀 보고 / 추측클릭 제거 확인"
 "$PY" test/test_skipreport.py
 
 reset_browsers
-stage "[10/23] 헛클릭 감지·재시도 테스트"
+stage "[10/26] 헛클릭 감지·재시도 테스트"
 "$PY" test/test_deadclick.py
 
 reset_browsers
-stage "[11/23] 모달 가림 테스트"
+stage "[11/26] 모달 가림 테스트"
 "$PY" test/test_modalblock.py
 
 reset_browsers
-stage "[12/23] 스크롤 팝업 테스트"
+stage "[12/26] 스크롤 팝업 테스트"
 "$PY" test/test_scrollmodal.py
 
 reset_browsers
-stage "[13/23] 중복 동의 테스트"
+stage "[13/26] 중복 동의 테스트"
 "$PY" test/test_doubleagree.py
 
 reset_browsers
-stage "[14/23] 동의 2개 모달 테스트"
+stage "[14/26] 동의 2개 모달 테스트"
 "$PY" test/test_twoagree.py
 
 reset_browsers
-stage "[15/23] 셀렉터 집기 / 패널 드래그 테스트"
+stage "[15/26] 셀렉터 집기 / 패널 드래그 테스트"
 "$PY" test/test_picker.py
 
 reset_browsers
-stage "[16/23] 건너뛰기 금지 테스트"
+stage "[16/26] 건너뛰기 금지 테스트"
 "$PY" test/test_noskip.py
 
 reset_browsers
-stage "[17/23] 무장 유지 / 결제창 판정 테스트"
+stage "[17/26] 무장 유지 / 결제창 판정 테스트"
 "$PY" test/test_armpersist.py
 
 reset_browsers
-stage "[18/23] 달력 최신날짜 / 목표날짜 형식 테스트"
+stage "[18/26] 달력 최신날짜 / 목표날짜 형식 테스트"
 "$PY" test/test_calendar.py
 
 reset_browsers
-stage "[19/23] 통화 KRW / 결제수단 대체 테스트"
+stage "[19/26] 통화 KRW / 결제수단 대체 테스트"
 "$PY" test/test_currency.py
 
 reset_browsers
-stage "[20/23] 통화 변경 후 화면 되돌아감 테스트"
+stage "[20/26] 통화 변경 후 화면 되돌아감 테스트"
 "$PY" test/test_currestart.py
 
 reset_browsers
-stage "[21/23] 발사 시각 입력 테스트"
+stage "[21/26] 발사 시각 입력 테스트"
 "$PY" test/test_opentime.py
 
 reset_browsers
-stage "[22/23] 목표 날짜 오픈 대기 테스트"
+stage "[22/26] 목표 날짜 오픈 대기 테스트"
 "$PY" test/test_openwait.py
 
 reset_browsers
-stage "[23/23] 로그인 확인 테스트"
+stage "[23/26] 로그인 확인 테스트"
 "$PY" test/test_login.py
+
+stage "[24/26] 바로 시작 주소 테스트"
+node test/test_deeplink.js
+
+stage "[25/26] 조회 응답 계측 테스트"
+node test/test_probe.js
+
+reset_browsers
+stage "[26/26] 달력 건너뛰기 테스트"
+"$PY" test/test_skipcal.py
 
 reset_browsers
 printf '\n\033[32m전체 통과\033[0m\n'

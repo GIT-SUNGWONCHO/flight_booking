@@ -394,6 +394,71 @@
     return n;
   }
 
+  // ---- 달력 건너뛰기(바로 시작) ------------------------------------------
+  /* 실측 27.7초 중 절반 이상이 대한항공 페이지가 그려지기를 기다린 시간이다.
+   * 우리 폴링을 조여봐야 몇 밀리초다. 남은 방법은 페이지를 덜 거치는 것 하나뿐이라,
+   * 달력에서 날짜를 고르고 검색하는 두 단계와 그에 딸린 페이지 전환을 통째로
+   * 건너뛰고 조회 페이지로 바로 들어간다. */
+
+  /** 지금(또는 주어진 주소가) 항공편 조회 페이지인가. */
+  function onDeparture(href) {
+    return /\/booking\/select-award-(wait-)?flight\//.test(
+      String(href == null ? location.href : href));
+  }
+
+  /* URL 에 박힌 날짜를 모두 찾는다. 왕복(RT)이면 가는 날/오는 날이 둘 다 들어 있어서,
+   * 아무거나 바꾸면 오는 날을 망가뜨린다. 그래서 "몇 번째 날짜인지" 까지 돌려주고,
+   * 바꿀 때도 그 자리만 고른다. */
+  var URL_DATE = /(20\d{2})([-.\/]?)(\d{2})\2(\d{2})/g;
+
+  /** URL 안의 날짜들. [{at, len, y, m, d, sep, mmdd}] */
+  function urlDates(url) {
+    var out = [], m;
+    URL_DATE.lastIndex = 0;
+    while ((m = URL_DATE.exec(String(url || '')))) {
+      var mo = +m[3], d = +m[4];
+      if (mo < 1 || mo > 12 || d < 1 || d > 31) continue;
+      out.push({ at: m.index, len: m[0].length, y: +m[1], sep: m[2],
+                 m: mo, d: d, mmdd: ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2) });
+    }
+    return out;
+  }
+
+  /** 오늘(KST) 이후로 가장 먼저 오는 그 월일의 연도. 마일리지 예매는 360일쯤
+   *  앞을 보므로 "다음에 오는 그 날" 이 항상 맞다. */
+  function nextYearFor(mmdd, nowMs) {
+    var md = monthDay(mmdd);
+    if (!md) return null;
+    var p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul',
+      year: 'numeric', month: '2-digit', day: '2-digit' })
+      .formatToParts(new Date(nowMs == null ? Date.now() : nowMs))
+      .reduce(function (a, x) { a[x.type] = x.value; return a; }, {});
+    var y = +p.year, today = p.month + '-' + p.day;
+    return md > today ? y : y + 1;
+  }
+
+  /** 저장해둔 조회 URL 의 "가는 날" 자리를 목표 날짜로 바꾼다.
+   *  @param url   지난 번에 붙잡아둔 조회 페이지 주소
+   *  @param was   붙잡을 당시의 가는 날 ("08-21") - 어느 자리를 바꿀지 고르는 기준
+   *  @param want  이번에 갈 날 ("08-22")
+   *  @returns {url, why} - url 이 없으면 why 에 이유가 담긴다 (달력 경로로 되돌아간다) */
+  function retarget(url, was, want) {
+    var a = monthDay(was), b = monthDay(want);
+    if (!b) return { url: null, why: '목표 날짜를 해석하지 못했습니다' };
+    if (!url) return { url: null, why: '저장된 조회 주소가 없습니다' };
+    if (a === b) return { url: url, why: '' };          // 같은 날 - 손댈 것이 없다
+    var ds = urlDates(url);
+    if (!ds.length) return { url: null, why: '주소에 날짜가 없어 바꿀 수 없습니다' };
+    var hit = null;
+    for (var i = 0; i < ds.length; i++) if (ds[i].mmdd === a) { hit = ds[i]; break; }
+    /* 어느 자리가 가는 날인지 못 고르면 바꾸지 않는다. 왕복이면 오는 날을 건드릴
+     * 위험이 있고, 엉뚱한 날 예매는 3초 버는 것과 비교할 수 없다. */
+    if (!hit) return { url: null, why: '주소에서 가는 날(' + a + ') 자리를 찾지 못했습니다' };
+    var y = nextYearFor(b);
+    var repl = y + hit.sep + b.slice(0, 2) + hit.sep + b.slice(3);
+    return { url: url.slice(0, hit.at) + repl + url.slice(hit.at + hit.len), why: '' };
+  }
+
   var U = {
     visible: visible, label: label, cssPath: cssPath, findEl: findEl, CLICKABLE: CLICKABLE,
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
@@ -401,6 +466,8 @@
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
+    onDeparture: onDeparture, urlDates: urlDates, retarget: retarget,
+    nextYearFor: nextYearFor,
     alreadyOn: alreadyOn
   };
   try { W.KE_UTIL = U; } catch (e) {}

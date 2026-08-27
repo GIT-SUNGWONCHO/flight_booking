@@ -92,6 +92,8 @@ const out = [
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();`),
+  /* probe 는 가능한 한 일찍 - 페이지가 좌석 조회를 쏘기 전에 fetch/XHR 을 감싸야 한다 */
+  isolate('probe', readFileSync('ke_award/probe.js', 'utf8')),
   isolate('steps', baked.js),
   isolate('recorder', readFileSync('ke_award/recorder.js', 'utf8')),
   isolate('editor', readFileSync('ke_award/editor.js', 'utf8')),

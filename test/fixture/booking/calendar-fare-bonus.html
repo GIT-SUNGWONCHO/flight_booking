@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>달력 (픽스처)</title>
+<h1>보너스 항공권 달력</h1>
+<div id="dep-fare-20">20 08월 20일 (금)</div>
+<div id="dep-fare-21">21 08월 21일 (토)</div>
+<div id="dep-fare-22">22 08월 22일 (일)</div>
+<button id="search">검색</button>
+<script>
+  window.__clicks = [];
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[id]'); if (t) window.__clicks.push(t.id);
+  }, true);
+  // 검색을 누르면 조회 페이지로 넘어간다 - 실제 사이트와 같은 모양으로.
+  document.getElementById('search').addEventListener('click', function () {
+    var d = (window.__clicks.find(function (x) { return x.indexOf('dep-fare-') === 0; }) || '').slice(9);
+    location.href = 'select-award-flight/departure.html'
+      + '?tripType=RT&depDate=202708' + (d || '21') + '&retDate=20270905&cabin=PR';
+  });
+</script>

@@ -25,6 +25,7 @@
   var LS = 'ke_award_hud_v1';
   var S = {
     targetKst: '',        // "2026-08-22 10:00:00"
+    skipCalendar: false,  // 달력을 건너뛰고 조회 페이지로 바로 들어간다
     leadMs: 150,          // 네트워크 지연 보정: 이만큼 먼저 발사
     pos: null,            // 패널 위치 {left, top}. 사이트 UI 를 가리면 옮길 수 있게
                           // 드래그해서 옮긴 자리를 기억한다
@@ -154,6 +155,59 @@
    * 여기서 바로 play() 를 부르면 안 된다 - recorder 의 tick 이 낡은 화면에서 1단계
    * (그날 새로 열린 날짜)를 눌러버리고, 이어지는 새로고침이 그 선택을 통째로 날린다.
    * 예약은 localStorage 에 남아 새 문서가 뜰 때 recorder 가 스스로 집어간다. */
+  /* 긴 글을 보여주는 상자. 콘솔은 복사가 불편하다는 지적이 있어서
+   * (실제로 이 화면들은 콘솔 복사가 막혀 있다) 선택 가능한 textarea 로 띄운다. */
+  function showText(title, text) {
+    var old = document.getElementById('ke-text');
+    if (old) old.remove();
+    var box = document.createElement('div');
+    box.id = 'ke-text';
+    box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);'
+                      + 'display:flex;align-items:center;justify-content:center';
+    box.innerHTML =
+      '<div style="background:#fff;padding:16px;border-radius:8px;width:min(760px,92vw)">'
+      + '<b style="font:13px sans-serif"></b>'
+      + '<textarea style="width:100%;height:55vh;margin-top:8px;font:11px Consolas,monospace"></textarea>'
+      + '<button style="margin-top:8px;padding:6px 12px">닫기</button></div>';
+    box.querySelector('b').textContent = title;
+    var ta = box.querySelector('textarea');
+    ta.value = text;
+    box.querySelector('button').onclick = function () { box.remove(); };
+    box.onclick = function (e) { if (e.target === box) box.remove(); };
+    document.documentElement.appendChild(box);
+    try { ta.focus(); ta.select(); } catch (e) {}
+  }
+
+  // ---- 달력 건너뛰기 -----------------------------------------------------
+  /* 실측 27.7초 중 절반 이상이 페이지가 그려지기를 기다린 시간이었다. 폴링을 조여봐야
+   * 몇 밀리초라, 남은 방법은 페이지를 덜 거치는 것뿐이다. 달력에서 날짜를 고르고
+   * 검색하는 두 단계와 그에 딸린 페이지 전환을 통째로 건너뛴다.
+   *
+   * 주소 형식은 추측하지 않는다. 지난 번에 실제로 지나간 조회 페이지 주소를 붙잡아
+   * 두고 그것을 다시 쓴다. 목표 날짜가 그때와 다르면 '가는 날' 자리만 고친다 -
+   * 왕복이면 오는 날도 주소에 들어 있어서 아무거나 바꾸면 안 된다. */
+
+  /** 지금 바로 시작이 가능한가. {url, from, why} */
+  function skipPlan(R) {
+    var U2 = W.KE_UTIL || window.KE_UTIL;
+    if (!R || !U2) return { why: '준비 안 됨' };
+    var st = R.state;
+    if (!st.deepLink) return { why: '아직 저장된 조회 주소가 없습니다 - 한 번 끝까지 돌리면 저장됩니다' };
+    if (!st.expectDate) return { why: '목표 날짜를 넣어야 합니다 (건너뛰면 화면에서 날짜를 확인할 수 없습니다)' };
+    var from = R.departureStep();
+    if (from < 0) return { why: '조회 페이지에서 시작하는 단계가 없습니다' };
+    var r = U2.retarget(st.deepLink, st.deepLinkDate, st.expectDate);
+    if (!r.url) return { why: r.why };
+    return { url: r.url, from: from, why: '' };
+  }
+
+  function skipStatus(R) {
+    if (!S.skipCalendar) return '';
+    var p = skipPlan(R);
+    return p.url ? ('바로 시작 준비됨 - ' + R.state.expectDate + ' 로 ' + (p.from + 1) + '단계부터')
+                 : ('바로 시작 불가: ' + p.why + ' - 달력부터 진행합니다');
+  }
+
   function fire(reason) {
     var R = REC();
     var U2 = W.KE_UTIL || window.KE_UTIL;
@@ -171,11 +225,20 @@
       toast('녹화된 단계가 없습니다 - 먼저 ● 녹화 하세요', true);
       return false;
     }
-    if (!R.armForReload()) return false;
+    /* 달력 건너뛰기가 켜져 있고 조건이 맞으면 새로고침 대신 조회 페이지로 바로 간다.
+     * 조건이 안 맞으면 이유를 알리고 원래대로 달력부터 - 조용히 건너뛰지 않는다. */
+    var plan = S.skipCalendar ? skipPlan(R) : { why: '' };
+    if (!R.armForReload(plan.url ? plan.from : 0)) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
     keepAwake(false);
     save();
+    if (plan.url) {
+      toast('발사 (' + reason + ') - 달력 건너뛰고 조회 페이지로 @ ' + fmtKst(nowSrv()));
+      setTimeout(function () { location.href = plan.url; }, 0);
+      return true;
+    }
+    if (S.skipCalendar) toast('바로 시작 불가(' + plan.why + ') - 달력부터 진행합니다', true);
     toast('발사 (' + reason + ') - 새로고침 후 재생 @ ' + fmtKst(nowSrv()));
     setTimeout(function () { location.reload(); }, 0);
     return true;
@@ -354,6 +417,14 @@
     var rec = root.querySelector('#ke-rec');
     var play = root.querySelector('#ke-play');
     var msg = root.querySelector('#ke-rec-msg');
+    /* '바로 시작' 이 되는지는 목표 날짜와 저장된 주소에 달렸는데, 둘 다 recorder 쪽
+     * 상태다. 여기서 같이 갱신하지 않으면 목표 날짜를 고쳐도 안내가 옛날 것으로
+     * 남아, 안 되는 줄 알고 있다가 정작 되거나 그 반대가 된다. */
+    var pr = root.querySelector('#ke-probe');
+    var P = W.KE_PROBE || window.KE_PROBE;
+    if (pr && P) pr.textContent = P.summary();
+    var why = root.querySelector('#ke-skipcal-why');
+    if (why) why.textContent = skipStatus(R);
     if (lab) {
       var el = R.elapsed ? R.elapsed() : 0;
       /* 어디서 온 단계인지 항상 보이게 한다. 브라우저에 남은 옛날 녹화가 도는데
@@ -403,6 +474,8 @@
       root.querySelector('#ke-cabin').value = R2.state.cabin || '일반석';
       root.querySelector('#ke-expect').value = R2.state.expectDate || '';
       root.querySelector('#ke-allowpay').checked = !!R2.state.allowPay;
+      root.querySelector('#ke-skipcal').checked = !!S.skipCalendar;
+      root.querySelector('#ke-skipcal-why').textContent = skipStatus(R2);
     }
     var arm = root.querySelector('#ke-arm');
     arm.textContent = S.armed ? '■ 정지' : '▶ 대기 시작';
@@ -449,6 +522,13 @@
       '<label style="display:flex;align-items:center;gap:5px;margin-top:6px;color:#c00">' +
       '<input type="checkbox" id="ke-allowpay" style="width:auto">' +
       '결제하기까지 자동 (결제창 열림)</label>' +
+      '<label style="display:flex;align-items:center;gap:5px;margin-top:4px">' +
+      '<input type="checkbox" id="ke-skipcal" style="width:auto">' +
+      '달력 건너뛰고 바로 조회</label>' +
+      '<div id="ke-skipcal-why" style="color:#888;margin:2px 0 0 20px"></div>' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
+      '<span id="ke-probe" style="color:#888;flex:1"></span>' +
+      '<button id="ke-probe-dump" style="padding:2px 6px;font-size:11px">조회 응답</button></div>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
       '<label>예매 단계: <b id="ke-step-label">0단계</b></label>' +
       '<div class="row">' +
@@ -528,6 +608,9 @@
       };
       root.querySelector('#ke-expect').onchange = function (e) {
         R.state.expectDate = e.target.value.trim(); R.save();
+        /* save() 는 localStorage 에 쓰기만 하고 패널에 알리지 않는다. '바로 시작'
+         * 안내가 목표 날짜에 달려 있으므로 여기서 직접 다시 그린다. */
+        renderRec();
         toast(R.state.expectDate
           ? '목표 날짜 ' + R.state.expectDate + ' - 다르면 멈춥니다'
           : '목표 날짜 검사 끔');
@@ -540,6 +623,18 @@
         toast(R.state.allowPay
           ? '결제하기까지 자동 - 결제창이 열립니다'
           : '결제 직전에서 멈춥니다 (기본)', R.state.allowPay);
+      };
+      /* 좌석이 언제 매진으로 바뀌는지는 서버만 알지만, 화면이 잔여석을 그릴 때 쓰는
+       * 응답은 우리도 볼 수 있다. 09:00 에 사람이 개발자도구를 붙잡고 있을 수는
+       * 없으므로 자동으로 기록해두고 여기서 꺼내 본다. */
+      root.querySelector('#ke-probe-dump').onclick = function () {
+        var P = W.KE_PROBE || window.KE_PROBE;
+        showText('조회 응답 기록 (매진 판정이 어디서 오는지 확인용)',
+                 P ? (P.dump() || '아직 기록된 조회 응답이 없습니다') : 'probe 없음');
+      };
+      root.querySelector('#ke-skipcal').onchange = function (e) {
+        S.skipCalendar = !!e.target.checked; save(); render();
+        toast(S.skipCalendar ? skipStatus(R) : '달력부터 처음대로 진행합니다');
       };
       R.onChange(renderRec);
       renderRec();

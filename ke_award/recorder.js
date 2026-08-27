@@ -47,6 +47,7 @@
     playing: false,
     idx: 0,
     playAfterReload: false, // 새로고침이 끝난 뒤에 재생을 시작하라는 예약 (armForReload)
+    playFrom: 0,          // 그 재생을 몇 번째 단계부터 시작할지 (달력 건너뛰기)
     startedAt: 0,         // 발사 시각(ms). 단계별/총 소요시간 표시용
     /* 재생이 끝났지만 사람이 봐야 하는 상태인가.
      * 예전에는 skipped/skippedList 로 "건너뛴 단계"를 셌는데, 건너뛰기 기능을
@@ -82,6 +83,14 @@
     settleMs: 250,        // 이만큼 화면이 잠잠해야 다음 단계를 누른다
     maxSettleMs: 2500,    // 계속 바뀌기만 하면 이 시간 뒤에는 그냥 누른다
     retryClickMs: 1200,   // 막혔을 때 직전 단계를 다시 눌러보는 간격
+    /* 달력 건너뛰기(바로 시작)용. 조회 페이지를 지날 때마다 그 주소를 붙잡아둔다.
+     * 주소 형식을 추측하지 않고 실제로 지나간 것을 쓰기 위한 것이다.
+     * deepLinkDate 는 붙잡을 당시의 '가는 날' - 다음에 목표 날짜가 바뀌면
+     * 주소의 어느 자리를 고쳐야 하는지 고르는 기준이 된다. */
+    deepLink: '',
+    baseLink: '',         // 달력 페이지 주소. 바로 시작이 튕겼을 때 되돌아갈 곳
+    deepLinkDate: '',
+    pickedDate: '',       // 달력에서 방금 고른 날 (MM-DD). deepLinkDate 의 재료
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
     bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
@@ -149,17 +158,6 @@
     adoptBaked(S.steps.length ? '스크립트가 갱신되어 이전 녹화를 대체함' : '최초 적용');
   }
 
-  /* armForReload() 로 예약해둔 재생을 여기서 시작한다.
-   * 이 코드는 새 문서가 뜰 때마다 한 번 실행되므로, "새로고침이 끝난 뒤" 라는
-   * 시점이 정확히 보장된다. 낡은 화면에서 1단계를 눌러버리고 그 결과가 새로고침에
-   * 날아가는 사고를 막기 위한 것이다. */
-  if (S.playAfterReload) {
-    S.playAfterReload = false;
-    S.playing = true;
-    S.idx = 0;
-    save();
-  }
-
   var listeners = [];
   function emit() {
     for (var i = 0; i < listeners.length; i++) {
@@ -191,6 +189,65 @@
     S.message = msg;
     emit();
   }
+
+  /* 아래 블록은 log()/emit() 를 쓴다. 원래 파일 앞쪽에 있었는데, 그 자리에서는
+   * listeners 가 아직 초기화 전(undefined)이라 log() 한 번에 모듈 전체가 죽었다.
+   * (증상: 패널이 통째로 안 뜸) 로그를 쓰는 시작 코드는 여기 아래에 둔다. */
+  /* armForReload() 로 예약해둔 재생을 여기서 시작한다.
+   * 이 코드는 새 문서가 뜰 때마다 한 번 실행되므로, "새로고침이 끝난 뒤" 라는
+   * 시점이 정확히 보장된다. 낡은 화면에서 1단계를 눌러버리고 그 결과가 새로고침에
+   * 날아가는 사고를 막기 위한 것이다. */
+  if (S.playAfterReload) {
+    S.playAfterReload = false;
+    S.playing = true;
+    S.idx = S.playFrom || 0;
+    S.playFrom = 0;
+    /* 달력을 건너뛰고 조회 페이지로 바로 들어갔는데 엉뚱한 데 떨어졌다면(세션 만료,
+     * 주소 형식 변경 등) 그 자리에서 단계를 눌러선 안 된다. 붙잡아둔 달력 주소로
+     * 돌아가 처음부터 한다 - 오늘 실측만큼 걸릴 뿐, 놓치지는 않는다. */
+    if (S.idx > 0 && !U.onDeparture()) {
+      var back = S.baseLink;
+      S.idx = 0;
+      log('바로 시작이 조회 페이지로 가지 못했습니다 (' + location.pathname
+          + ') - 달력으로 돌아가 처음부터 합니다');
+      if (back) {
+        /* 여기서 return 하면 이 파일 끝의 W.KE_REC 대입까지 건너뛰어 패널이 통째로
+         * 죽는다. 재생만 멈추고 이동은 예약해둔다. */
+        S.playAfterReload = true;
+        S.playing = false;
+        setTimeout(function () { location.href = back; }, 0);
+      } else {
+        S.problem = true;
+        S.message = '바로 시작이 실패했고 돌아갈 달력 주소도 없습니다 - 직접 조회하세요';
+      }
+    }
+    save();
+  }
+
+  /* 조회 페이지에 도착할 때마다 그 주소를 붙잡아둔다. 다음 번 '바로 시작' 이 이걸
+   * 쓴다. 형식을 추측하지 않고 실제로 지나간 주소를 그대로 재사용한다. */
+  /* 달력 페이지도 붙잡아둔다. 바로 시작이 튕겼을 때 여기로 되돌아와 처음부터 한다.
+   * 되돌아갈 곳이 없으면 튕긴 순간 그냥 멈추는 수밖에 없다. */
+  try {
+    if (S.steps.length && S.steps[0].url
+        && location.pathname.indexOf(S.steps[0].url) >= 0
+        && location.href !== S.baseLink) {
+      S.baseLink = location.href;
+      save();
+    }
+  } catch (e) {}
+
+  try {
+    if (U.onDeparture() && location.search) {
+      var pd = S.pickedDate || S.expectDate || '';
+      if (location.href !== S.deepLink || (pd && pd !== S.deepLinkDate)) {
+        S.deepLink = location.href;
+        S.deepLinkDate = pd;
+        save();
+      }
+    }
+  } catch (e) {}
+
 
   // ---- 녹화 --------------------------------------------------------------
   function onClick(ev) {
@@ -329,17 +386,19 @@
   /* "새로고침한 다음 처음부터 재생" 예약. 지금 당장은 재생하지 않는다.
    * play() 를 먼저 부르면 tick 이 낡은 화면에서 1단계를 눌러버리고, 이어지는
    * 새로고침이 그 결과를 통째로 날린다 (정시 발사 때 날짜 선택이 사라지는 사고). */
-  function armForReload() {
+  function armForReload(startIdx) {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return false; }
     S.recording = false;
     S.playing = false;
     S.idx = 0;
+    S.playFrom = startIdx > 0 ? startIdx : 0;
     S.playAfterReload = true;
     S.startedAt = Date.now();   // 소요시간은 "발사 시점" 부터 센다 (새로고침 포함)
     S.problem = false;
     scrollClicks = 0;
     save();
-    log('새로고침 후 처음부터 재생 예약됨');
+    log(S.playFrom ? ('페이지 이동 후 ' + (S.playFrom + 1) + '단계부터 재생 예약됨')
+                   : '새로고침 후 처음부터 재생 예약됨');
     return true;
   }
   function reset() { S.idx = 0; save(); log('처음 단계로'); }
@@ -663,6 +722,9 @@
     var payBefore = isPay(step) ? ((S.lastOpen && S.lastOpen.at) || 0) : null;
 
     lastLabel = U.label(el);   // 다음 단계의 onlyIfPrev 판단에 쓴다
+    /* 달력에서 무슨 날을 골랐는지 남긴다. 조회 페이지에 도착하면 이 값이 그 주소의
+     * '가는 날' 이 되고, 다음 번 바로 시작이 어느 자리를 고칠지 여기서 정해진다. */
+    if (step.dynamicDate) { S.pickedDate = U.monthDay(lastLabel) || ''; }
     U.fireClick(el);
 
 
@@ -789,6 +851,14 @@
   var API = {
     record: record, stop: stopRec, play: play, pause: pause,
     armForReload: armForReload,
+    /* 달력 건너뛰기는 '조회 페이지에서 하는 첫 단계' 로 들어간다. 단계마다 녹화된
+     * url 이 있으므로 추측할 필요가 없다. 없으면 -1 (건너뛰기 불가). */
+    departureStep: function () {
+      for (var i = 0; i < S.steps.length; i++) {
+        if (U.onDeparture(S.steps[i].url || '')) return i;
+      }
+      return -1;
+    },
     reset: reset, clear: clear, state: S, save: save,
     exportJson: exportJson, showExport: showExport, importJson: importJson,
     removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,

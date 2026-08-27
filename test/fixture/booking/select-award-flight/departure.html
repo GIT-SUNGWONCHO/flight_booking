@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><title>조회 (픽스처)</title>
+<h1>항공편 조회</h1>
+<div id="shown"></div>
+<button id="seat">프레스티지 PR 1석 · KE927 ICN→FCO</button>
+<button id="next">다음</button>
+<script>
+  window.__clicks = [];
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[id]'); if (t) window.__clicks.push(t.id);
+  }, true);
+  var m = /depDate=(\d{8})/.exec(location.search);
+  document.getElementById('shown').textContent = m ? ('가는 날 ' + m[1]) : '날짜 없음';
+</script>

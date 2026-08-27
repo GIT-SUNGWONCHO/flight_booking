@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.19.0
+// @version      1.20.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -412,6 +412,71 @@ try {
     return n;
   }
 
+  // ---- 달력 건너뛰기(바로 시작) ------------------------------------------
+  /* 실측 27.7초 중 절반 이상이 대한항공 페이지가 그려지기를 기다린 시간이다.
+   * 우리 폴링을 조여봐야 몇 밀리초다. 남은 방법은 페이지를 덜 거치는 것 하나뿐이라,
+   * 달력에서 날짜를 고르고 검색하는 두 단계와 그에 딸린 페이지 전환을 통째로
+   * 건너뛰고 조회 페이지로 바로 들어간다. */
+
+  /** 지금(또는 주어진 주소가) 항공편 조회 페이지인가. */
+  function onDeparture(href) {
+    return /\/booking\/select-award-(wait-)?flight\//.test(
+      String(href == null ? location.href : href));
+  }
+
+  /* URL 에 박힌 날짜를 모두 찾는다. 왕복(RT)이면 가는 날/오는 날이 둘 다 들어 있어서,
+   * 아무거나 바꾸면 오는 날을 망가뜨린다. 그래서 "몇 번째 날짜인지" 까지 돌려주고,
+   * 바꿀 때도 그 자리만 고른다. */
+  var URL_DATE = /(20\d{2})([-.\/]?)(\d{2})\2(\d{2})/g;
+
+  /** URL 안의 날짜들. [{at, len, y, m, d, sep, mmdd}] */
+  function urlDates(url) {
+    var out = [], m;
+    URL_DATE.lastIndex = 0;
+    while ((m = URL_DATE.exec(String(url || '')))) {
+      var mo = +m[3], d = +m[4];
+      if (mo < 1 || mo > 12 || d < 1 || d > 31) continue;
+      out.push({ at: m.index, len: m[0].length, y: +m[1], sep: m[2],
+                 m: mo, d: d, mmdd: ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2) });
+    }
+    return out;
+  }
+
+  /** 오늘(KST) 이후로 가장 먼저 오는 그 월일의 연도. 마일리지 예매는 360일쯤
+   *  앞을 보므로 "다음에 오는 그 날" 이 항상 맞다. */
+  function nextYearFor(mmdd, nowMs) {
+    var md = monthDay(mmdd);
+    if (!md) return null;
+    var p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul',
+      year: 'numeric', month: '2-digit', day: '2-digit' })
+      .formatToParts(new Date(nowMs == null ? Date.now() : nowMs))
+      .reduce(function (a, x) { a[x.type] = x.value; return a; }, {});
+    var y = +p.year, today = p.month + '-' + p.day;
+    return md > today ? y : y + 1;
+  }
+
+  /** 저장해둔 조회 URL 의 "가는 날" 자리를 목표 날짜로 바꾼다.
+   *  @param url   지난 번에 붙잡아둔 조회 페이지 주소
+   *  @param was   붙잡을 당시의 가는 날 ("08-21") - 어느 자리를 바꿀지 고르는 기준
+   *  @param want  이번에 갈 날 ("08-22")
+   *  @returns {url, why} - url 이 없으면 why 에 이유가 담긴다 (달력 경로로 되돌아간다) */
+  function retarget(url, was, want) {
+    var a = monthDay(was), b = monthDay(want);
+    if (!b) return { url: null, why: '목표 날짜를 해석하지 못했습니다' };
+    if (!url) return { url: null, why: '저장된 조회 주소가 없습니다' };
+    if (a === b) return { url: url, why: '' };          // 같은 날 - 손댈 것이 없다
+    var ds = urlDates(url);
+    if (!ds.length) return { url: null, why: '주소에 날짜가 없어 바꿀 수 없습니다' };
+    var hit = null;
+    for (var i = 0; i < ds.length; i++) if (ds[i].mmdd === a) { hit = ds[i]; break; }
+    /* 어느 자리가 가는 날인지 못 고르면 바꾸지 않는다. 왕복이면 오는 날을 건드릴
+     * 위험이 있고, 엉뚱한 날 예매는 3초 버는 것과 비교할 수 없다. */
+    if (!hit) return { url: null, why: '주소에서 가는 날(' + a + ') 자리를 찾지 못했습니다' };
+    var y = nextYearFor(b);
+    var repl = y + hit.sep + b.slice(0, 2) + hit.sep + b.slice(3);
+    return { url: url.slice(0, hit.at) + repl + url.slice(hit.at + hit.len), why: '' };
+  }
+
   var U = {
     visible: visible, label: label, cssPath: cssPath, findEl: findEl, CLICKABLE: CLICKABLE,
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
@@ -419,6 +484,8 @@ try {
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
+    onDeparture: onDeparture, urlDates: urlDates, retarget: retarget,
+    nextYearFor: nextYearFor,
     alreadyOn: alreadyOn
   };
   try { W.KE_UTIL = U; } catch (e) {}
@@ -435,12 +502,121 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.19.0', hash: '44c40da' };
+  var B = { version: '1.20.0', hash: '9d4ed4b' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
 } catch (e) {
   console.error('[KE] build 로드 실패:', e);
+}
+
+
+// ---------- probe ----------
+try {
+/* 좌석이 언제 "매진" 이 되는지 알아내기 위한 계측.
+ *
+ * 사용자 관찰: 달력에서 검색하고 좌석 등급 화면으로 넘어가면 5초 만에 프레스티지가
+ * 이미 매진인 날이 있다. 5초 안에 결제까지 끝낸 사람이 있을 리는 없으므로, 남는
+ * 설명은 둘 중 하나다.
+ *
+ *   (가) 좌석을 고르고 넘어가는 순간 서버가 좌석을 잠근다(hold). 그러면 결승선은
+ *        '결제하기' 가 아니라 '다음' 이고, 그 뒤 14.8초는 경쟁이 아니다.
+ *   (나) 화면에 보인 잔여석이 애초에 캐시된 옛날 값이었다.
+ *
+ * 어느 쪽인지는 서버만 알지만, 우리가 볼 수 있는 것이 하나 있다: 조회 화면이 좌석
+ * 수를 그릴 때 쓰는 API 응답이다. 잔여석 필드가 어떻게 생겼고 언제 0이 되는지를
+ * 09:00 에 사람이 지켜볼 수는 없으므로 자동으로 남긴다.
+ *
+ * 아무것도 바꾸지 않는다 - 오가는 응답을 엿보고 기록만 한다. */
+(function () {
+  var W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  if (W.KE_PROBE) return;
+
+  var MAX = 12;            // 최근 몇 건까지 들고 있을지
+  var CAP = 200000;        // 한 건당 글자 수 상한 (localStorage 가 아니라 메모리다)
+  var hits = [];
+
+  /* 좌석/운임 조회로 보이는 응답만 남긴다. 전부 남기면 로그인 토큰 같은 것까지
+   * 딸려 들어와 내보내기가 위험해진다. */
+  var WANTED = /(availab|award|bonus|flight|fare|segment|seat)/i;
+  var SEATY = /"(remain\w*|avail\w*Seat\w*|seat\w*Count|numberOfSeats?|bookableSeats?)"\s*:/i;
+
+  function note(kind, url, status, body) {
+    try {
+      if (!WANTED.test(String(url))) return;
+      var text = String(body == null ? '' : body);
+      if (text.length > CAP) text = text.slice(0, CAP) + '…(잘림)';
+      hits.push({ at: Date.now(), kind: kind, url: String(url).slice(0, 300),
+                  status: status, seaty: SEATY.test(text), body: text });
+      if (hits.length > MAX) hits.shift();
+    } catch (e) {}
+  }
+
+  // ---- fetch ----
+  try {
+    var of = W.fetch;
+    if (typeof of === 'function' && !of.__keProbe) {
+      var nf = function (input, init) {
+        var url = (input && input.url) || input;
+        return of.apply(this, arguments).then(function (res) {
+          try {
+            if (WANTED.test(String(url))) {
+              res.clone().text().then(function (t) { note('fetch', url, res.status, t); },
+                                      function () {});
+            }
+          } catch (e) {}
+          return res;
+        });
+      };
+      nf.__keProbe = true;
+      W.fetch = nf;
+    }
+  } catch (e) {}
+
+  // ---- XMLHttpRequest ----
+  try {
+    var XP = W.XMLHttpRequest && W.XMLHttpRequest.prototype;
+    if (XP && !XP.__keProbe) {
+      var oo = XP.open, os = XP.send;
+      XP.open = function (m, u) { try { this.__keUrl = u; } catch (e) {} return oo.apply(this, arguments); };
+      XP.send = function () {
+        var self = this;
+        try {
+          self.addEventListener('load', function () {
+            var t = '';
+            try { t = (self.responseType === '' || self.responseType === 'text') ? self.responseText : ''; } catch (e) {}
+            note('xhr', self.__keUrl, self.status, t);
+          });
+        } catch (e) {}
+        return os.apply(this, arguments);
+      };
+      XP.__keProbe = true;
+    }
+  } catch (e) {}
+
+  /** 사람이 읽을 한 줄 요약. 잔여석 필드를 가진 응답이 몇 건인지가 핵심이다. */
+  function summary() {
+    if (!hits.length) return '기록된 조회 응답 없음';
+    var seaty = hits.filter(function (h) { return h.seaty; }).length;
+    return hits.length + '건 기록 (좌석 수 필드 있음: ' + seaty + '건)';
+  }
+
+  W.KE_PROBE = {
+    hits: function () { return hits; },
+    summary: summary,
+    dump: function () {
+      return hits.map(function (h) {
+        return '### ' + new Date(h.at).toISOString() + '  [' + h.kind + ' ' + h.status + ']'
+             + (h.seaty ? '  <- 좌석 수 필드 있음' : '') + '\n' + h.url + '\n' + h.body;
+      }).join('\n\n');
+    },
+    clear: function () { hits = []; }
+  };
+  if (W !== window) { try { window.KE_PROBE = W.KE_PROBE; } catch (e) {} }
+})();
+
+} catch (e) {
+  console.error('[KE] probe 로드 실패:', e);
 }
 
 
@@ -510,6 +686,7 @@ try {
     playing: false,
     idx: 0,
     playAfterReload: false, // 새로고침이 끝난 뒤에 재생을 시작하라는 예약 (armForReload)
+    playFrom: 0,          // 그 재생을 몇 번째 단계부터 시작할지 (달력 건너뛰기)
     startedAt: 0,         // 발사 시각(ms). 단계별/총 소요시간 표시용
     /* 재생이 끝났지만 사람이 봐야 하는 상태인가.
      * 예전에는 skipped/skippedList 로 "건너뛴 단계"를 셌는데, 건너뛰기 기능을
@@ -545,6 +722,14 @@ try {
     settleMs: 250,        // 이만큼 화면이 잠잠해야 다음 단계를 누른다
     maxSettleMs: 2500,    // 계속 바뀌기만 하면 이 시간 뒤에는 그냥 누른다
     retryClickMs: 1200,   // 막혔을 때 직전 단계를 다시 눌러보는 간격
+    /* 달력 건너뛰기(바로 시작)용. 조회 페이지를 지날 때마다 그 주소를 붙잡아둔다.
+     * 주소 형식을 추측하지 않고 실제로 지나간 것을 쓰기 위한 것이다.
+     * deepLinkDate 는 붙잡을 당시의 '가는 날' - 다음에 목표 날짜가 바뀌면
+     * 주소의 어느 자리를 고쳐야 하는지 고르는 기준이 된다. */
+    deepLink: '',
+    baseLink: '',         // 달력 페이지 주소. 바로 시작이 튕겼을 때 되돌아갈 곳
+    deepLinkDate: '',
+    pickedDate: '',       // 달력에서 방금 고른 날 (MM-DD). deepLinkDate 의 재료
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
     bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
@@ -612,17 +797,6 @@ try {
     adoptBaked(S.steps.length ? '스크립트가 갱신되어 이전 녹화를 대체함' : '최초 적용');
   }
 
-  /* armForReload() 로 예약해둔 재생을 여기서 시작한다.
-   * 이 코드는 새 문서가 뜰 때마다 한 번 실행되므로, "새로고침이 끝난 뒤" 라는
-   * 시점이 정확히 보장된다. 낡은 화면에서 1단계를 눌러버리고 그 결과가 새로고침에
-   * 날아가는 사고를 막기 위한 것이다. */
-  if (S.playAfterReload) {
-    S.playAfterReload = false;
-    S.playing = true;
-    S.idx = 0;
-    save();
-  }
-
   var listeners = [];
   function emit() {
     for (var i = 0; i < listeners.length; i++) {
@@ -654,6 +828,65 @@ try {
     S.message = msg;
     emit();
   }
+
+  /* 아래 블록은 log()/emit() 를 쓴다. 원래 파일 앞쪽에 있었는데, 그 자리에서는
+   * listeners 가 아직 초기화 전(undefined)이라 log() 한 번에 모듈 전체가 죽었다.
+   * (증상: 패널이 통째로 안 뜸) 로그를 쓰는 시작 코드는 여기 아래에 둔다. */
+  /* armForReload() 로 예약해둔 재생을 여기서 시작한다.
+   * 이 코드는 새 문서가 뜰 때마다 한 번 실행되므로, "새로고침이 끝난 뒤" 라는
+   * 시점이 정확히 보장된다. 낡은 화면에서 1단계를 눌러버리고 그 결과가 새로고침에
+   * 날아가는 사고를 막기 위한 것이다. */
+  if (S.playAfterReload) {
+    S.playAfterReload = false;
+    S.playing = true;
+    S.idx = S.playFrom || 0;
+    S.playFrom = 0;
+    /* 달력을 건너뛰고 조회 페이지로 바로 들어갔는데 엉뚱한 데 떨어졌다면(세션 만료,
+     * 주소 형식 변경 등) 그 자리에서 단계를 눌러선 안 된다. 붙잡아둔 달력 주소로
+     * 돌아가 처음부터 한다 - 오늘 실측만큼 걸릴 뿐, 놓치지는 않는다. */
+    if (S.idx > 0 && !U.onDeparture()) {
+      var back = S.baseLink;
+      S.idx = 0;
+      log('바로 시작이 조회 페이지로 가지 못했습니다 (' + location.pathname
+          + ') - 달력으로 돌아가 처음부터 합니다');
+      if (back) {
+        /* 여기서 return 하면 이 파일 끝의 W.KE_REC 대입까지 건너뛰어 패널이 통째로
+         * 죽는다. 재생만 멈추고 이동은 예약해둔다. */
+        S.playAfterReload = true;
+        S.playing = false;
+        setTimeout(function () { location.href = back; }, 0);
+      } else {
+        S.problem = true;
+        S.message = '바로 시작이 실패했고 돌아갈 달력 주소도 없습니다 - 직접 조회하세요';
+      }
+    }
+    save();
+  }
+
+  /* 조회 페이지에 도착할 때마다 그 주소를 붙잡아둔다. 다음 번 '바로 시작' 이 이걸
+   * 쓴다. 형식을 추측하지 않고 실제로 지나간 주소를 그대로 재사용한다. */
+  /* 달력 페이지도 붙잡아둔다. 바로 시작이 튕겼을 때 여기로 되돌아와 처음부터 한다.
+   * 되돌아갈 곳이 없으면 튕긴 순간 그냥 멈추는 수밖에 없다. */
+  try {
+    if (S.steps.length && S.steps[0].url
+        && location.pathname.indexOf(S.steps[0].url) >= 0
+        && location.href !== S.baseLink) {
+      S.baseLink = location.href;
+      save();
+    }
+  } catch (e) {}
+
+  try {
+    if (U.onDeparture() && location.search) {
+      var pd = S.pickedDate || S.expectDate || '';
+      if (location.href !== S.deepLink || (pd && pd !== S.deepLinkDate)) {
+        S.deepLink = location.href;
+        S.deepLinkDate = pd;
+        save();
+      }
+    }
+  } catch (e) {}
+
 
   // ---- 녹화 --------------------------------------------------------------
   function onClick(ev) {
@@ -792,17 +1025,19 @@ try {
   /* "새로고침한 다음 처음부터 재생" 예약. 지금 당장은 재생하지 않는다.
    * play() 를 먼저 부르면 tick 이 낡은 화면에서 1단계를 눌러버리고, 이어지는
    * 새로고침이 그 결과를 통째로 날린다 (정시 발사 때 날짜 선택이 사라지는 사고). */
-  function armForReload() {
+  function armForReload(startIdx) {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return false; }
     S.recording = false;
     S.playing = false;
     S.idx = 0;
+    S.playFrom = startIdx > 0 ? startIdx : 0;
     S.playAfterReload = true;
     S.startedAt = Date.now();   // 소요시간은 "발사 시점" 부터 센다 (새로고침 포함)
     S.problem = false;
     scrollClicks = 0;
     save();
-    log('새로고침 후 처음부터 재생 예약됨');
+    log(S.playFrom ? ('페이지 이동 후 ' + (S.playFrom + 1) + '단계부터 재생 예약됨')
+                   : '새로고침 후 처음부터 재생 예약됨');
     return true;
   }
   function reset() { S.idx = 0; save(); log('처음 단계로'); }
@@ -1126,6 +1361,9 @@ try {
     var payBefore = isPay(step) ? ((S.lastOpen && S.lastOpen.at) || 0) : null;
 
     lastLabel = U.label(el);   // 다음 단계의 onlyIfPrev 판단에 쓴다
+    /* 달력에서 무슨 날을 골랐는지 남긴다. 조회 페이지에 도착하면 이 값이 그 주소의
+     * '가는 날' 이 되고, 다음 번 바로 시작이 어느 자리를 고칠지 여기서 정해진다. */
+    if (step.dynamicDate) { S.pickedDate = U.monthDay(lastLabel) || ''; }
     U.fireClick(el);
 
 
@@ -1252,6 +1490,14 @@ try {
   var API = {
     record: record, stop: stopRec, play: play, pause: pause,
     armForReload: armForReload,
+    /* 달력 건너뛰기는 '조회 페이지에서 하는 첫 단계' 로 들어간다. 단계마다 녹화된
+     * url 이 있으므로 추측할 필요가 없다. 없으면 -1 (건너뛰기 불가). */
+    departureStep: function () {
+      for (var i = 0; i < S.steps.length; i++) {
+        if (U.onDeparture(S.steps[i].url || '')) return i;
+      }
+      return -1;
+    },
     reset: reset, clear: clear, state: S, save: save,
     exportJson: exportJson, showExport: showExport, importJson: importJson,
     removeStep: removeStep, moveStep: moveStep, insertAt: insertAt, setStep: setStep,
@@ -1477,6 +1723,7 @@ try {
   var LS = 'ke_award_hud_v1';
   var S = {
     targetKst: '',        // "2026-08-22 10:00:00"
+    skipCalendar: false,  // 달력을 건너뛰고 조회 페이지로 바로 들어간다
     leadMs: 150,          // 네트워크 지연 보정: 이만큼 먼저 발사
     pos: null,            // 패널 위치 {left, top}. 사이트 UI 를 가리면 옮길 수 있게
                           // 드래그해서 옮긴 자리를 기억한다
@@ -1606,6 +1853,59 @@ try {
    * 여기서 바로 play() 를 부르면 안 된다 - recorder 의 tick 이 낡은 화면에서 1단계
    * (그날 새로 열린 날짜)를 눌러버리고, 이어지는 새로고침이 그 선택을 통째로 날린다.
    * 예약은 localStorage 에 남아 새 문서가 뜰 때 recorder 가 스스로 집어간다. */
+  /* 긴 글을 보여주는 상자. 콘솔은 복사가 불편하다는 지적이 있어서
+   * (실제로 이 화면들은 콘솔 복사가 막혀 있다) 선택 가능한 textarea 로 띄운다. */
+  function showText(title, text) {
+    var old = document.getElementById('ke-text');
+    if (old) old.remove();
+    var box = document.createElement('div');
+    box.id = 'ke-text';
+    box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);'
+                      + 'display:flex;align-items:center;justify-content:center';
+    box.innerHTML =
+      '<div style="background:#fff;padding:16px;border-radius:8px;width:min(760px,92vw)">'
+      + '<b style="font:13px sans-serif"></b>'
+      + '<textarea style="width:100%;height:55vh;margin-top:8px;font:11px Consolas,monospace"></textarea>'
+      + '<button style="margin-top:8px;padding:6px 12px">닫기</button></div>';
+    box.querySelector('b').textContent = title;
+    var ta = box.querySelector('textarea');
+    ta.value = text;
+    box.querySelector('button').onclick = function () { box.remove(); };
+    box.onclick = function (e) { if (e.target === box) box.remove(); };
+    document.documentElement.appendChild(box);
+    try { ta.focus(); ta.select(); } catch (e) {}
+  }
+
+  // ---- 달력 건너뛰기 -----------------------------------------------------
+  /* 실측 27.7초 중 절반 이상이 페이지가 그려지기를 기다린 시간이었다. 폴링을 조여봐야
+   * 몇 밀리초라, 남은 방법은 페이지를 덜 거치는 것뿐이다. 달력에서 날짜를 고르고
+   * 검색하는 두 단계와 그에 딸린 페이지 전환을 통째로 건너뛴다.
+   *
+   * 주소 형식은 추측하지 않는다. 지난 번에 실제로 지나간 조회 페이지 주소를 붙잡아
+   * 두고 그것을 다시 쓴다. 목표 날짜가 그때와 다르면 '가는 날' 자리만 고친다 -
+   * 왕복이면 오는 날도 주소에 들어 있어서 아무거나 바꾸면 안 된다. */
+
+  /** 지금 바로 시작이 가능한가. {url, from, why} */
+  function skipPlan(R) {
+    var U2 = W.KE_UTIL || window.KE_UTIL;
+    if (!R || !U2) return { why: '준비 안 됨' };
+    var st = R.state;
+    if (!st.deepLink) return { why: '아직 저장된 조회 주소가 없습니다 - 한 번 끝까지 돌리면 저장됩니다' };
+    if (!st.expectDate) return { why: '목표 날짜를 넣어야 합니다 (건너뛰면 화면에서 날짜를 확인할 수 없습니다)' };
+    var from = R.departureStep();
+    if (from < 0) return { why: '조회 페이지에서 시작하는 단계가 없습니다' };
+    var r = U2.retarget(st.deepLink, st.deepLinkDate, st.expectDate);
+    if (!r.url) return { why: r.why };
+    return { url: r.url, from: from, why: '' };
+  }
+
+  function skipStatus(R) {
+    if (!S.skipCalendar) return '';
+    var p = skipPlan(R);
+    return p.url ? ('바로 시작 준비됨 - ' + R.state.expectDate + ' 로 ' + (p.from + 1) + '단계부터')
+                 : ('바로 시작 불가: ' + p.why + ' - 달력부터 진행합니다');
+  }
+
   function fire(reason) {
     var R = REC();
     var U2 = W.KE_UTIL || window.KE_UTIL;
@@ -1623,11 +1923,20 @@ try {
       toast('녹화된 단계가 없습니다 - 먼저 ● 녹화 하세요', true);
       return false;
     }
-    if (!R.armForReload()) return false;
+    /* 달력 건너뛰기가 켜져 있고 조건이 맞으면 새로고침 대신 조회 페이지로 바로 간다.
+     * 조건이 안 맞으면 이유를 알리고 원래대로 달력부터 - 조용히 건너뛰지 않는다. */
+    var plan = S.skipCalendar ? skipPlan(R) : { why: '' };
+    if (!R.armForReload(plan.url ? plan.from : 0)) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
     keepAwake(false);
     save();
+    if (plan.url) {
+      toast('발사 (' + reason + ') - 달력 건너뛰고 조회 페이지로 @ ' + fmtKst(nowSrv()));
+      setTimeout(function () { location.href = plan.url; }, 0);
+      return true;
+    }
+    if (S.skipCalendar) toast('바로 시작 불가(' + plan.why + ') - 달력부터 진행합니다', true);
     toast('발사 (' + reason + ') - 새로고침 후 재생 @ ' + fmtKst(nowSrv()));
     setTimeout(function () { location.reload(); }, 0);
     return true;
@@ -1806,6 +2115,14 @@ try {
     var rec = root.querySelector('#ke-rec');
     var play = root.querySelector('#ke-play');
     var msg = root.querySelector('#ke-rec-msg');
+    /* '바로 시작' 이 되는지는 목표 날짜와 저장된 주소에 달렸는데, 둘 다 recorder 쪽
+     * 상태다. 여기서 같이 갱신하지 않으면 목표 날짜를 고쳐도 안내가 옛날 것으로
+     * 남아, 안 되는 줄 알고 있다가 정작 되거나 그 반대가 된다. */
+    var pr = root.querySelector('#ke-probe');
+    var P = W.KE_PROBE || window.KE_PROBE;
+    if (pr && P) pr.textContent = P.summary();
+    var why = root.querySelector('#ke-skipcal-why');
+    if (why) why.textContent = skipStatus(R);
     if (lab) {
       var el = R.elapsed ? R.elapsed() : 0;
       /* 어디서 온 단계인지 항상 보이게 한다. 브라우저에 남은 옛날 녹화가 도는데
@@ -1855,6 +2172,8 @@ try {
       root.querySelector('#ke-cabin').value = R2.state.cabin || '일반석';
       root.querySelector('#ke-expect').value = R2.state.expectDate || '';
       root.querySelector('#ke-allowpay').checked = !!R2.state.allowPay;
+      root.querySelector('#ke-skipcal').checked = !!S.skipCalendar;
+      root.querySelector('#ke-skipcal-why').textContent = skipStatus(R2);
     }
     var arm = root.querySelector('#ke-arm');
     arm.textContent = S.armed ? '■ 정지' : '▶ 대기 시작';
@@ -1901,6 +2220,13 @@ try {
       '<label style="display:flex;align-items:center;gap:5px;margin-top:6px;color:#c00">' +
       '<input type="checkbox" id="ke-allowpay" style="width:auto">' +
       '결제하기까지 자동 (결제창 열림)</label>' +
+      '<label style="display:flex;align-items:center;gap:5px;margin-top:4px">' +
+      '<input type="checkbox" id="ke-skipcal" style="width:auto">' +
+      '달력 건너뛰고 바로 조회</label>' +
+      '<div id="ke-skipcal-why" style="color:#888;margin:2px 0 0 20px"></div>' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
+      '<span id="ke-probe" style="color:#888;flex:1"></span>' +
+      '<button id="ke-probe-dump" style="padding:2px 6px;font-size:11px">조회 응답</button></div>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
       '<label>예매 단계: <b id="ke-step-label">0단계</b></label>' +
       '<div class="row">' +
@@ -1980,6 +2306,9 @@ try {
       };
       root.querySelector('#ke-expect').onchange = function (e) {
         R.state.expectDate = e.target.value.trim(); R.save();
+        /* save() 는 localStorage 에 쓰기만 하고 패널에 알리지 않는다. '바로 시작'
+         * 안내가 목표 날짜에 달려 있으므로 여기서 직접 다시 그린다. */
+        renderRec();
         toast(R.state.expectDate
           ? '목표 날짜 ' + R.state.expectDate + ' - 다르면 멈춥니다'
           : '목표 날짜 검사 끔');
@@ -1992,6 +2321,18 @@ try {
         toast(R.state.allowPay
           ? '결제하기까지 자동 - 결제창이 열립니다'
           : '결제 직전에서 멈춥니다 (기본)', R.state.allowPay);
+      };
+      /* 좌석이 언제 매진으로 바뀌는지는 서버만 알지만, 화면이 잔여석을 그릴 때 쓰는
+       * 응답은 우리도 볼 수 있다. 09:00 에 사람이 개발자도구를 붙잡고 있을 수는
+       * 없으므로 자동으로 기록해두고 여기서 꺼내 본다. */
+      root.querySelector('#ke-probe-dump').onclick = function () {
+        var P = W.KE_PROBE || window.KE_PROBE;
+        showText('조회 응답 기록 (매진 판정이 어디서 오는지 확인용)',
+                 P ? (P.dump() || '아직 기록된 조회 응답이 없습니다') : 'probe 없음');
+      };
+      root.querySelector('#ke-skipcal').onchange = function (e) {
+        S.skipCalendar = !!e.target.checked; save(); render();
+        toast(S.skipCalendar ? skipStatus(R) : '달력부터 처음대로 진행합니다');
       };
       R.onChange(renderRec);
       renderRec();
