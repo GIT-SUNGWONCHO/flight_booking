@@ -725,6 +725,29 @@
        * 바뀐 것일 수 있다. 그래도 팝업은 끝까지 내려야 [확인] 이 열리므로, 버튼과
        * 무관하게 스크롤 자체는 계속 밀어준다. */
       if (SCROLLY.test(step.text || '')) U.scrollToBottom();
+
+      /* 조회 화면에서 좌석이 아직 안 보이는 것은 "그 등급이 없다" 가 아니라 "아직
+       * 안 열렸다" 일 수 있다. 09:00 정각에 새로고침해도 서버가 좌석을 몇 백
+       * 밀리초 늦게 푸는 경우가 그렇다. 멈춰서 기다리는 건 경쟁에서 최악이므로,
+       * 달력에서 목표 날짜를 기다릴 때와 똑같이 다시 불러와서 본다.
+       *
+       * 단계 번호는 그대로 둔다 - 새로고침 뒤 이 단계부터 다시 본다. */
+      if (step.dynamicCabin && U.onDeparture() && now - waitingSince > S.retryClickMs) {
+        if (!S.openWaitSince) S.openWaitSince = now;
+        if (now - S.openWaitSince > S.openWaitMaxMs) {
+          finish('"' + S.cabin + '" 좌석이 ' + Math.round(S.openWaitMaxMs / 1000)
+                 + '초 동안 안 나왔습니다 - 화면을 확인하세요', true);
+          return;
+        }
+        if (now - lastOpenReloadAt < S.openRetryMs) return;
+        lastOpenReloadAt = now;
+        save();
+        log('"' + S.cabin + '" 좌석이 아직 없습니다 - 새로고침하고 다시 봅니다 ('
+            + Math.round((now - S.openWaitSince) / 1000) + '초째)');
+        setTimeout(function () { location.reload(); }, 0);
+        return;
+      }
+
       if (now - waitingSince > S.retryClickMs && retryPrevClick(now)) return;
       if (now - waitingSince > S.stepTimeoutMs) {
         // 스크린샷 한 장으로 원인 파악이 되도록 패널 상태줄에 진단 요약을 그대로 붙인다.
@@ -743,6 +766,9 @@
 
     waitingSince = 0;
     lastClickAt = now;
+    /* 무언가를 눌렀다는 것은 기다리던 것이 나타났다는 뜻이다. 누적된 대기 시간을
+     * 다음 단계로 넘기면, 뒤에서 잠깐 못 찾은 것이 곧바로 제한시간 초과가 된다. */
+    S.openWaitSince = 0;
 
     /* 결제 단계는 눌렀다고 끝난 게 아니다. 팝업이 차단되면 로그만 남고 창은 안 뜬다.
      * 누르기 직전의 open 기록을 잡아두고, 잠시 뒤 새 기록이 생겼는지로 판정한다. */

@@ -17,6 +17,7 @@ jsessionId 와 pageTicket 이 있다. 서버가 흐름 순서를 강제한다는
 """
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -40,8 +41,36 @@ DEP = HOST + "/booking/select-award-flight/departure"
 MIME = {".html": "text/html", ".json": "application/json"}
 
 
+def availability(day: str, seats: bool) -> str:
+    """조회 화면이 좌석을 그릴 때 쓰는 응답. 실측(2026-08-27) 모양 그대로.
+
+    좌석이 아직 안 열린 날이면 availFlightList 가 비어 서버 응답에서 날짜를 알 수
+    없다 - 그때는 검색 위젯만이 근거가 된다. 그 상황을 그대로 재현해야 의미가 있다."""
+    strip = [f"202708{d:02d}" for d in range(18, 25)]
+    flights = [{
+        "flightId": "0", "departureDate": day + "132000",
+        "flightInfoList": [{"carrierCode": "KE", "flightNumber": "931"}],
+        "commercialFareFamilyList": [
+            {"fareFamily": "KEBONUSPR", "seatCount": "1", "soldout": False,
+             "totalMileage": "62500"}],
+    }] if seats else []
+    return json.dumps({"upsellBoundAvailList": [{
+        "boundId": "0",
+        "upsellCalendarFareList": [{"date": d} for d in strip],
+        "availFlightList": flights,
+    }]}, ensure_ascii=False)
+
+
 def serve(route):
-    path = route.request.url.split("?")[0][len(HOST):]
+    url = route.request.url
+    path = url.split("?")[0][len(HOST):]
+    q = dict(pair.split("=", 1) for pair in url.split("?")[1].split("&")) if "?" in url else {}
+    if path.endswith("awardAvailability.json"):
+        # 날짜와 좌석 유무는 요청에 따라 만들어 준다. 고정 파일로 두면 화면이 보는
+        # 날짜와 응답의 날짜가 어긋나 매크로가(옳게) 거부해버린다.
+        route.fulfill(status=200, content_type="application/json",
+                      body=availability(q.get("d", "20270821"), q.get("seats") == "1"))
+        return
     f = FX.parent / path.lstrip("/")
     if f.is_dir() or not f.suffix:
         f = f.with_suffix(".html")
@@ -64,7 +93,10 @@ STEPS = """[
   {sel:'#dep-fare-22', text:'22 08월 22일 (일)', tag:'div',
    url:'/booking/calendar-fare-bonus', dynamicDate:true},
   {sel:'#search', text:'검색', tag:'button', url:'/booking/calendar-fare-bonus'},
-  {sel:'#seat', text:'프레스티지', tag:'button',
+  /* 실제 steps.json 과 같이 좌석 단계는 dynamicCabin 이다 - 고정 셀렉터가 아니라
+     그날 화면에서 등급으로 찾는다. 좌석이 아직 안 열렸을 때 다시 불러오는 것도
+     이 단계에 걸려 있다. */
+  {sel:'#seat', text:'프레스티지', tag:'button', dynamicCabin:true,
    url:'/booking/select-award-flight/departure'},
   {sel:'#next', text:'다음', tag:'button',
    url:'/booking/select-award-flight/departure'}
@@ -86,9 +118,15 @@ def main() -> int:
             ctx.add_init_script(js)
             ctx.route(HOST + "/**", serve)
 
-            def land(url: str) -> None:
+            def land(url: str, fresh_loads: bool = False) -> None:
                 pg.goto(url, timeout=60000)
                 pg.wait_for_function("() => !!window.KE_REC && !!window.KE_HUD", timeout=20000)
+                if fresh_loads:
+                    # 픽스처의 로드 횟수는 sessionStorage 에 쌓인다. 앞 케이스가
+                    # 올려둔 값을 그대로 두면 "아직 좌석 없음" 상황이 재현되지 않는다.
+                    pg.evaluate("() => { sessionStorage.removeItem('loads'); }")
+                    pg.reload()
+                    pg.wait_for_function("() => !!window.KE_HUD", timeout=20000)
 
             def setup(expect: str, skip: bool = True) -> None:
                 pg.evaluate(f"""() => {{
@@ -96,8 +134,10 @@ def main() -> int:
                   KE_REC.state.playing = false; KE_REC.state.playAfterReload = false;
                   KE_REC.state.allowPay = false;
                   KE_REC.state.expectDate = {expect!r};
+                  KE_REC.state.cabin = '프레스티지';
                   KE_REC.save();
-                  KE_HUD.state.skipCalendar = {'true' if skip else 'false'}; KE_HUD.save();
+                  KE_HUD.state.startAt = {'departure' if skip else 'calendar'!r};
+                  KE_HUD.save();
                   KE_HUD.render();
                 }}""")
 
@@ -107,7 +147,8 @@ def main() -> int:
             # ---------- 거절해야 하는 경우들 ----------
             land(CAL)
             setup("08-21")
-            check("조회 페이지가 아닙니다" in why(), "달력에 서 있으면 건너뛰지 않는다", why())
+            check("조회 페이지가 아닙니다" in why(),
+                  "조회 모드인데 달력에 서 있으면 그렇다고 말한다", why())
 
             land(DEP)
             pg.wait_for_timeout(400)
@@ -148,11 +189,52 @@ def main() -> int:
             check("준비됨" in why(),
                   "좌석이 아직 없어도 '이 날짜로 대기 중' 이면 준비된 것이다", why())
 
+            # ---------- 09:00 정각: 좌석이 조금 늦게 열린다 ----------
+            # 정각에 새로고침해도 서버가 좌석을 몇 백 밀리초 늦게 푸는 경우가 있다.
+            # 여기서 20초를 기다리다 포기하면 그날 좌석은 그대로 날아간다.
+            # 달력에서 목표 날짜를 기다릴 때처럼 다시 불러와서 봐야 한다.
+            land(DEP + "?depDate=20270822&opensAfter=3", fresh_loads=True)
+            setup("08-22")
+            pg.evaluate("() => { KE_REC.state.stepTimeoutMs = 4000; KE_REC.save(); }")
+            check(pg.evaluate("!document.getElementById('seat')"),
+                  "첫 화면에는 좌석이 아직 없다 (상황 재현)")
+
+            pg.evaluate("() => KE_HUD.fire('정각 테스트')")
+            pg.wait_for_function("() => (window.__clicks||[]).includes('next')", timeout=30000)
+            loads = pg.evaluate("window.__loads")
+            check(loads >= 3, f"좌석이 나올 때까지 다시 불러왔다 (로드 {loads}회)")
+            check("departure" in pg.url, "그 사이에도 달력으로 새지 않는다", pg.url)
+            check(pg.evaluate("KE_REC.state.problem") is False,
+                  "포기하지 않고 끝까지 갔다",
+                  str(pg.evaluate("KE_REC.state.message")))
+
+            # ---------- 끝내 안 나오면 사람을 부른다 ----------
+            land(DEP + "?depDate=20270822&opensAfter=999", fresh_loads=True)
+            setup("08-22")
+            pg.evaluate("""() => {
+              KE_REC.state.openWaitMaxMs = 2500;   // 실제로는 180초
+              KE_REC.state.openWaitSince = 0;
+              KE_REC.save();
+            }""")
+            pg.evaluate("() => KE_HUD.fire('안 열리는 경우')")
+            pg.wait_for_function("() => window.KE_REC && !window.KE_REC.state.playing"
+                                 " && window.KE_REC.state.problem", timeout=40000)
+            msg = pg.evaluate("KE_REC.state.message")
+            check("안 나왔습니다" in (msg or ""),
+                  "무한히 새로고침하지 않고 사람을 부른다", msg)
+            print(f"      {msg}")
+            pg.evaluate("() => { KE_REC.state.openWaitMaxMs = 180000; KE_REC.save(); }")
+
             # ---------- 꺼두면 원래대로 ----------
             land(DEP)
             pg.wait_for_timeout(400)
             setup("08-21", skip=False)
-            check(why() == "", "체크박스를 끄면 안내도 나오지 않는다", why())
+            check("달력 화면이 아닙니다" in why(),
+                  "달력 모드로 되돌리면 '여기는 달력이 아니다' 라고 말한다", why())
+            land(CAL)
+            setup("08-21", skip=False)
+            check("준비됨" in why() and "1단계" in why(),
+                  "달력 모드로 달력에 서 있으면 준비됨", why())
         finally:
             ctx.close()
 

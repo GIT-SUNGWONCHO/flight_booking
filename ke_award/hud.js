@@ -25,7 +25,11 @@
   var LS = 'ke_award_hud_v1';
   var S = {
     targetKst: '',        // "2026-08-22 10:00:00"
-    skipCalendar: false,  // 달력을 건너뛰고 조회 페이지로 바로 들어간다
+    /* 어느 화면에 서 있다가 발사할 것인가. 둘은 서 있어야 할 페이지가 다르다.
+     *   'calendar'  - 달력에서 시작. 새로고침 -> 새로 열린 날짜 클릭 -> 검색 -> 조회
+     *   'departure' - 조회 화면에서 시작. 목표 날짜로 맞춰두고 그 자리에서 새로고침.
+     *                 달력 한 장과 그에 딸린 전환이 빠진다 */
+    startAt: 'calendar',
     leadMs: 150,          // 네트워크 지연 보정: 이만큼 먼저 발사
     pos: null,            // 패널 위치 {left, top}. 사이트 UI 를 가리면 옮길 수 있게
                           // 드래그해서 옮긴 자리를 기억한다
@@ -241,12 +245,22 @@
     return { inPlace: true, from: from, seen: seen, why: '' };
   }
 
-  function skipStatus(R) {
-    if (!S.skipCalendar) return '';
+  /* 고른 모드대로 지금 서 있는지 알려준다. 09:00 에 엉뚱한 화면에 서 있었다는 걸
+   * 그때 알면 늦다. 색으로도 구분해서 패널만 흘끗 봐도 알게 한다. */
+  function startStatus(R) {
+    var U2 = W.KE_UTIL || window.KE_UTIL;
+    if (S.startAt !== 'departure') {
+      var onCal = R && R.state.steps.length && R.state.steps[0].url
+                  && location.pathname.indexOf(R.state.steps[0].url) >= 0;
+      return onCal
+        ? { ok: true, text: '준비됨 - 이 달력에서 새로고침, 1단계부터' }
+        : { ok: false, text: '지금 달력 화면이 아닙니다 - 달력을 띄워두고 대기하세요' };
+    }
     var p = skipPlan(R);
-    if (!p.inPlace) return '바로 시작 불가: ' + p.why + ' - 달력부터 진행합니다';
-    return '바로 시작 준비됨 - 이 화면(' + p.seen + ')에서 새로고침, '
-         + (p.from + 1) + '단계부터';
+    return p.inPlace
+      ? { ok: true, text: '준비됨 - 이 조회 화면(' + p.seen + ')에서 새로고침, '
+                          + (p.from + 1) + '단계부터' }
+      : { ok: false, text: p.why };
   }
 
   function fire(reason) {
@@ -268,7 +282,9 @@
     }
     /* 달력 건너뛰기가 켜져 있고 조건이 맞으면 새로고침 대신 조회 페이지로 바로 간다.
      * 조건이 안 맞으면 이유를 알리고 원래대로 달력부터 - 조용히 건너뛰지 않는다. */
-    var plan = S.skipCalendar ? skipPlan(R) : { why: '' };
+    /* 조회 화면 모드인데 조건이 안 맞으면 조용히 넘어가지 않는다. 이유를 말하고
+     * 달력 경로로 간다 - 오늘 실측만큼 걸릴 뿐, 놓치지는 않는다. */
+    var plan = S.startAt === 'departure' ? skipPlan(R) : { why: '' };
     if (!R.armForReload(plan.inPlace ? plan.from : 0)) return false;
     // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
     S.armed = false;
@@ -280,7 +296,9 @@
       setTimeout(function () { location.reload(); }, 0);
       return true;
     }
-    if (S.skipCalendar) toast('바로 시작 불가(' + plan.why + ') - 달력부터 진행합니다', true);
+    if (S.startAt === 'departure') {
+      toast('조회 화면에서 시작할 수 없습니다 (' + plan.why + ') - 달력부터 진행합니다', true);
+    }
     toast('발사 (' + reason + ') - 새로고침 후 재생 @ ' + fmtKst(nowSrv()));
     setTimeout(function () { location.reload(); }, 0);
     return true;
@@ -479,7 +497,11 @@
       pr.style.color = /매진/.test(txt) ? '#c00' : '#888';
     }
     var why = root.querySelector('#ke-skipcal-why');
-    if (why) why.textContent = skipStatus(R);
+    if (why) {
+      var st2 = startStatus(R);
+      why.textContent = (st2.ok ? '✔ ' : '✖ ') + st2.text;
+      why.style.color = st2.ok ? '#2a7' : '#c00';
+    }
     if (lab) {
       var el = R.elapsed ? R.elapsed() : 0;
       /* 어디서 온 단계인지 항상 보이게 한다. 브라우저에 남은 옛날 녹화가 도는데
@@ -529,8 +551,7 @@
       root.querySelector('#ke-cabin').value = R2.state.cabin || '일반석';
       root.querySelector('#ke-expect').value = R2.state.expectDate || '';
       root.querySelector('#ke-allowpay').checked = !!R2.state.allowPay;
-      root.querySelector('#ke-skipcal').checked = !!S.skipCalendar;
-      root.querySelector('#ke-skipcal-why').textContent = skipStatus(R2);
+      root.querySelector('#ke-startat').value = S.startAt || 'calendar';
     }
     var arm = root.querySelector('#ke-arm');
     arm.textContent = S.armed ? '■ 정지' : '▶ 대기 시작';
@@ -577,10 +598,12 @@
       '<label style="display:flex;align-items:center;gap:5px;margin-top:6px;color:#c00">' +
       '<input type="checkbox" id="ke-allowpay" style="width:auto">' +
       '결제하기까지 자동 (결제창 열림)</label>' +
-      '<label style="display:flex;align-items:center;gap:5px;margin-top:4px">' +
-      '<input type="checkbox" id="ke-skipcal" style="width:auto">' +
-      '달력 건너뛰고 바로 조회</label>' +
-      '<div id="ke-skipcal-why" style="color:#888;margin:2px 0 0 20px"></div>' +
+      '<label><b>시작 화면</b> - 발사할 때 이 화면에 서 있어야 합니다</label>' +
+      '<select id="ke-startat">' +
+      '<option value="calendar">달력 (기본) - 새로 열린 날짜를 찾아서 조회</option>' +
+      '<option value="departure">조회 화면 - 목표 날짜로 맞춰두고 그 자리에서</option>' +
+      '</select>' +
+      '<div id="ke-skipcal-why" style="margin:2px 0 0 2px"></div>' +
       '<div style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
       '<span id="ke-probe" style="color:#888;flex:1"></span>' +
       '<button id="ke-probe-dump" style="padding:2px 6px;font-size:11px">조회 응답</button></div>' +
@@ -687,9 +710,9 @@
         showText('조회 응답 기록 (매진 판정이 어디서 오는지 확인용)',
                  P ? (P.dump() || '아직 기록된 조회 응답이 없습니다') : 'probe 없음');
       };
-      root.querySelector('#ke-skipcal').onchange = function (e) {
-        S.skipCalendar = !!e.target.checked; save(); render();
-        toast(S.skipCalendar ? skipStatus(R) : '달력부터 처음대로 진행합니다');
+      root.querySelector('#ke-startat').onchange = function (e) {
+        S.startAt = e.target.value; save(); render();
+        toast(startStatus(R).text, !startStatus(R).ok);
       };
       R.onChange(renderRec);
       renderRec();
