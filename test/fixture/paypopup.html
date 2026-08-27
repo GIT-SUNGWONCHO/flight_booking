@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8"><title>결제창 시뮬레이터</title>
+<body style="font:14px sans-serif;padding:20px">
+<!-- ?block=1 이면 팝업이 차단된 상황(window.open 이 null 을 돌려줌)을 흉내낸다.
+     "눌렀다" 와 "결제창이 떴다" 는 다르다 - 이걸 구분 못 하면 거짓 완료가 난다. -->
+<button id="pay">결제하기 새 창 열림</button>
+<script>
+var blocked = new URLSearchParams(location.search).has('block');
+window.__payClicks = 0;
+document.getElementById('pay').onclick = function () {
+  window.__payClicks++;
+  if (blocked) { window.open('about:blank'); return; }   // 아래에서 null 로 만든다
+  window.open('about:blank', '_blank', 'width=300,height=200');
+};
+if (blocked) {
+  var orig = window.open;
+  window.open = function () { return null; };            // 차단된 것처럼
+}
+</script>
+</body>

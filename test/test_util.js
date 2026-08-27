@@ -93,11 +93,19 @@ function check(name, cond) {
     makeEl('dep-fare-5-2', '17 08월 17일 (화)', { ariaDisabled: true }),  // 아직 안 열림
     makeEl('other-9-9', '99 09월 09일 (수) , 성수기 일반석'),             // id 접두어가 달라 후보에서 제외돼야 함
   ];
+  /* 요금등급 마커(일반석/프레스티지)는 화면이 다 그려진 뒤에야 붙는 경우가 있다.
+   * 그걸 조건으로 걸면 재생이 그 전에 훑을 때 하루 이틀 앞선 날짜를 고른다
+   * (실측: 22일이어야 하는데 20일이 선택됨). 마커와 무관하게 마지막 날짜를 고르고,
+   * 엉뚱한 날 예매는 목표 날짜 검사가 막는다. */
   const el = U.findLatestOpenDate('dep-fare-');
-  check('요금등급 없는/막힌 셀은 건너뛰고 마지막 예약 가능 날짜를 고름', el && el.id === 'dep-fare-5-1');
+  check('마커가 없어도 막히지 않은 마지막 날짜를 고름', el && el.id === 'dep-fare-5-1');
 
   POOL = [makeEl('dep-fare-1-1', '01 08월 01일 (토)')];
-  check('예약 가능한 날짜가 하나도 없으면 null', U.findLatestOpenDate('dep-fare-') === null);
+  check('마커가 없어도 날짜 숫자만 있으면 후보',
+        (U.findLatestOpenDate('dep-fare-') || {}).id === 'dep-fare-1-1');
+
+  POOL = [makeEl('dep-fare-1-1', ''), makeEl('dep-fare-1-2', '   ')];
+  check('날짜 숫자가 없는 여백 칸만 있으면 null', U.findLatestOpenDate('dep-fare-') === null);
 
   POOL = [makeEl('dep-fare-1-1', '01 08월 01일 (토) , 일반석', { rect: { width: 0, height: 0 } })];
   check('0px(안 보이는) 날짜 셀은 제외', U.findLatestOpenDate('dep-fare-') === null);

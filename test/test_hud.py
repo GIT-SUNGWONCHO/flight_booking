@@ -119,11 +119,11 @@ def main() -> int:
             # 사람이 보기 전에 치우지 않기 위함). 여기서는 재생 자체를 검증한다.
             pg.wait_for_function("() => !window.KE_REC.state.playing", timeout=20000)
             st = pg.evaluate("() => ({idx: KE_REC.state.idx, total: KE_REC.state.steps.length,"
-                             " skipped: KE_REC.state.skipped,"
+                             " problem: KE_REC.state.problem,"
                              " aborted: window.__aborted || null,"
                              " armed: window.KE_HUD.state.armed})")
             check(st["idx"] == st["total"], f"녹화 단계를 끝까지 재생 ({st['idx']}/{st['total']})")
-            check(not st["skipped"], f"건너뛴 단계 없음 (실제 {st['skipped']})")
+            check(st["problem"] is False, f"문제 없이 완료 (problem={st['problem']})")
             check(st["aborted"] is None, "오클릭 없음", f"눌림: {st['aborted']}")
             check(st["armed"] is False, "재생으로 넘어가며 HUD 무장은 해제됨")
 

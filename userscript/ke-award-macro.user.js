@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.14.0
+// @version      1.15.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -198,6 +198,23 @@ try {
     return null;
   }
 
+  /** 라벨에 text 가 "들어 있는" 요소를 찾는다.
+   * ensure 컨트롤은 라벨이 상태를 담는다("통화 KRW" / "통화 USD"). 정확 일치로는
+   * 영원히 못 찾으므로 부분 일치가 필요하다. 여러 개면 라벨이 가장 짧은 것
+   * (= 가장 구체적인 요소)을 고른다. */
+  function findContaining(text, exclude) {
+    if (!text) return null;
+    var all = candidates(document), best = null, bestLen = 1e9;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el === exclude || !visible(el) || inChrome(el)) continue;
+      var t = label(el);
+      if (t.indexOf(text) === -1) continue;
+      if (t.length < bestLen) { best = el; bestLen = t.length; }
+    }
+    return best;
+  }
+
   /** 재생이 단계를 못 찾고 멈췄을 때 왜 못 찾았는지 - 셀렉터가 몇 개 매치됐는지,
    * 텍스트가 일치하는 후보가 있는지 - 를 요약한다. 스크린샷 한 장으로 원인 파악이
    * 되도록 패널 상태줄에 그대로 얹는 용도. */
@@ -286,15 +303,36 @@ try {
     try { el.click(); } catch (e) { dispatch(MouseEvent, 'click', { button: 0 }); }
   }
 
-  var FARE_WORDS = /(일반석|프리미엄|프레스티지|일등석)/;
+  /** 라벨에서 월/일을 뽑아 "MM-DD" 로 만든다. "16 08월 16일 (월) , 성수기 일반석"
+   * 같은 라벨에서 08-16 을 얻는다. 못 뽑으면 null. */
+  function monthDay(text) {
+    var t = String(text || '');
+    /* 연-월-일이 먼저다. "2027-08-22" 에 월-일 패턴을 먼저 대면 "27-08" 을 집어
+     * 27월로 읽고 버린다. */
+    var m = t.match(/(\d{4})\s*[-\/.]\s*(\d{1,2})\s*[-\/.]\s*(\d{1,2})/);   // 2027-08-22
+    if (m) m = [m[0], m[2], m[3]];
+    if (!m) m = t.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);                   // 08월 16일
+    if (!m) m = t.match(/(\d{1,2})\s*[-\/.]\s*(\d{1,2})/);                   // 08-16, 8/16
+    if (!m) return null;
+    var mo = +m[1], d = +m[2];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    return ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2);
+  }
 
-  /** 특정 날짜를 하드코딩하지 않고, 달력에서 "예약 가능한 것 중 가장 나중(=제일 늦게
-   * 열린) 날짜" 를 찾는다. 마일리지 좌석은 매일 09:00 KST 에 하루치씩 새로 열리므로,
-   * 이 방식이면 스텝을 매일 다시 지정할 필요가 없다.
-   * idPrefix 로 시작하는 id 를 가진 셀들을 훑어서, 요금등급 글자(일반석/프레스티지 등)
-   * 가 붙어있는(=예약 가능한) 것들 중 DOM 순서상 마지막(=달력에서 가장 나중 날짜)을
-   * 반환한다. 요일만 있고 요금 정보가 없는 셀(아직 안 열렸거나 그 요일 운항이 없는
-   * 날)은 자동으로 제외된다. */
+  /** 목표 날짜 입력이 감지된 셀과 같은 날인가. "08-27", "8/27", "08월 27일" 모두 받는다. */
+  function sameDate(expect, labelText) {
+    var a = monthDay(expect), b = monthDay(labelText);
+    if (!a || !b) return null;    // 판정 불가 - 호출자가 결정
+    return a === b;
+  }
+
+  /** 달력에서 가장 나중(=제일 늦게 열린) 날짜 셀을 찾는다.
+   *
+   * 예전에는 요금등급 글자(일반석/프레스티지)가 붙은 셀만 후보로 삼았다. 그런데 그
+   * 마커는 화면이 다 그려진 뒤에야 붙는 경우가 있어서, 재생이 그 전에 훑으면 하루
+   * 이틀 앞선 날짜를 골랐다(실측: 22일이어야 하는데 20일이 선택됨).
+   * 등급 마커와 무관하게 "날짜 숫자가 있는 마지막 셀" 을 고른다. 엉뚱한 날 예매는
+   * 목표 날짜 검사가 막는다 - 그게 훨씬 확실한 방어선이다. */
   function findLatestOpenDate(idPrefix) {
     idPrefix = idPrefix || 'dep-fare-';
     var list;
@@ -304,8 +342,10 @@ try {
       var el = list[i];
       if (!visible(el)) continue;
       if (el.getAttribute('aria-disabled') === 'true' || el.disabled) continue;
-      if (/disable|unavail|soldout/i.test(el.className || '')) continue;
-      if (FARE_WORDS.test(label(el))) best = el;
+      var cls = typeof el.className === 'string' ? el.className : '';
+      if (/disable|unavail|soldout/i.test(cls)) continue;
+      if (!/\d/.test(label(el))) continue;    // 달력 여백 칸(빈 셀) 제외
+      best = el;
     }
     return best;
   }
@@ -361,6 +401,7 @@ try {
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
     findLatestOpenDate: findLatestOpenDate, inChrome: inChrome, realTarget: realTarget,
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
+    monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     alreadyOn: alreadyOn
   };
   try { W.KE_UTIL = U; } catch (e) {}
@@ -377,7 +418,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.14.0', hash: '057da37' };
+  var B = { version: '1.15.0', hash: '4c0dad1' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -389,7 +430,7 @@ try {
 // ---------- steps ----------
 try {
 (function () {
-  var S = [{"dynamicDate":true,"idPrefix":"dep-fare-","sel":"#dep-fare-5-1","text":"(날짜: 매번 최신 오픈일 자동 감지 - 16 08월 16일 (월) , 성수기 일반석 은 녹화 당시 예시)","tag":"td","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"sel":"#ac0e9a2f7f9ead9dbd368853f47deb65CalendarFareBonusMain > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host","text":"검색","tag":"kds-button_1","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"dynamicCabin":true,"sel":"","text":"(좌석: 패널에서 고른 등급을 매번 다시 찾음 - 녹화 당시는 '항공편명 KE901 일반석 52,500 마일')","tag":"label","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#payment-widget > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button > kds-button_1.--wds-ui.ui-button__host","text":"다음","tag":"kds-button_1","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#submit-passenger-ADT-0","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#submit-contact","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-3","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnAwardUseMileageApply","text":"적용","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted","text":"Npay","tag":"label","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-payment","text":"결제하기 새 창 열림","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false}];
+  var S = [{"dynamicDate":true,"idPrefix":"dep-fare-","sel":"#dep-fare-5-1","text":"(날짜: 매번 최신 오픈일 자동 감지 - 16 08월 16일 (월) , 성수기 일반석 은 녹화 당시 예시)","tag":"td","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"sel":"#ac0e9a2f7f9ead9dbd368853f47deb65CalendarFareBonusMain > div.payment-widget.bottom-fixed-area:nth-of-type(4) > kds-sticky.ang-sticky > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button.--wds-ui.ui-button__host > kds-button_1.--wds-ui.ui-button__host","text":"검색","tag":"kds-button_1","url":"/booking/calendar-fare-bonus","selectorOnly":false},{"dynamicCabin":true,"sel":"","text":"(좌석: 패널에서 고른 등급을 매번 다시 찾음 - 녹화 당시는 '항공편명 KE901 일반석 52,500 마일')","tag":"label","url":"/booking/select-award-flight/departure","selectorOnly":false},{"ensure":"KRW","sel":"","text":"통화","tag":"button","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#payment-widget > kds-sticky_1.--wds-ui.ui-sticky__host > kds-button > kds-button_1.--wds-ui.ui-button__host","text":"다음","tag":"kds-button_1","url":"/booking/select-award-flight/departure","selectorOnly":false},{"sel":"#submit-passenger-ADT-0","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#submit-contact","text":"확인","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-1","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btn-resv-agree-3","text":"동의","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnScrollDown > kds-button_1.--wds-ui.ui-button__host","text":"아래로 스크롤","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnConfirm > kds-button_1.--wds-ui.ui-button__host","text":"확인","tag":"kds-button_1","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"#btnAwardUseMileageApply","text":"적용","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false},{"sel":"ke-payment-interface-cont._folders.ng-star-inserted > ke-payment-interface-pres.ng-star-inserted > div.bundles.-bordered > div.-lined.ng-star-inserted:nth-of-type(2) > div.payment-method.ng-star-inserted:nth-of-type(1) > div.payment-method__item.ng-star-inserted:nth-of-type(3) > label.ng-star-inserted","text":"Npay","tag":"label","url":"/payment/gate/RT/NR","selectorOnly":false,"alt":[{"sel":"","text":"한국발행 신용/체크카드","selectorOnly":false},{"sel":"","text":"하나카드(구 외환, 하나SK)","selectorOnly":false}]},{"sel":"#btn-payment","text":"결제하기 새 창 열림","tag":"button","url":"/payment/gate/RT/NR","selectorOnly":false}];
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
   try { W.KE_STEPS_BAKED = S; } catch (e) {}
@@ -416,6 +457,14 @@ try {
  * 페이지 이동
  *   단계 중간에 페이지가 바뀌면 JS 상태가 날아간다. 진행 위치를 localStorage 에
  *   두고 새 문서에서 자동으로 이어서 재생한다.
+ *
+ * 단계를 건너뛰지 않는다
+ *   예전에는 "현재 단계를 못 찾으면 뒤쪽 단계가 눌릴 만한지 보고 건너뛰는" 기능이
+ *   있었다. 라벨 추측 클릭 엔진이 같은 버튼을 먼저 눌러버리던 시절의 보정책이었는데,
+ *   그 엔진을 걷어낸 뒤로는 오판만 낳았다: #btnConfirm 처럼 모달이 닫혀 있어도 DOM 에
+ *   남아 있는 요소를 보고 "동의는 이미 지나갔다" 고 판단해 동의 두 개를 통째로
+ *   건너뛰었다(실측). 못 찾으면 기다렸다가 직전 단계를 다시 누르고, 그래도 안 되면
+ *   멈춰서 사람을 부른다. 조용히 건너뛰는 것보다 멈추는 게 낫다.
  *
  * 콘솔
  *   KE_REC.record()  녹화 시작 / KE_REC.stop() 중지
@@ -445,17 +494,22 @@ try {
     idx: 0,
     playAfterReload: false, // 새로고침이 끝난 뒤에 재생을 시작하라는 예약 (armForReload)
     startedAt: 0,         // 발사 시각(ms). 단계별/총 소요시간 표시용
-    skipped: 0,           // resync 로 건너뛴 단계 수. 완료 보고를 정직하게 하기 위함
-    skippedList: [],      // 어떤 단계를 건너뛰었는지. 개수만 알려주면 판단을 못 한다
+    /* 재생이 끝났지만 사람이 봐야 하는 상태인가.
+     * 예전에는 skipped/skippedList 로 "건너뛴 단계"를 셌는데, 건너뛰기 기능을
+     * 없애면서 아무도 값을 올리지 않는 죽은 장치가 됐다. 그런데 hud 의 완료 판정은
+     * 그 값을 계속 보고 있어서 "안전장치가 있는 것처럼 보이는" 상태였다.
+     * 실제로 문제가 생긴 지점에서만 켜는 플래그로 바꾼다. */
+    problem: false,
     lastOpen: null,       // 사이트가 window.open 을 부른 결과 {at, ok}. 결제창이
                           // 실제로 떴는지 확인하는 유일한 방법이다
     message: '',          // 패널 상태줄. 여기 선언이 없으면 load() 가 걸러내서
                           // 마지막 단계가 페이지를 이동시킨 경우 왜 멈췄는지가 사라진다
-    expectDate: '',       // 목표 날짜(예: "08월 17일"). 넣으면 자동 감지한 최신 오픈일이
+    expectDate: '',       // 목표 날짜(예: "08-27"). 넣으면 자동 감지한 최신 오픈일이
                           // 이것과 다를 때 클릭하지 않고 멈춘다 (엉뚱한 날 예매 방지)
     cabin: '일반석',       // 좌석 등급. 연습은 '일반석', 실전은 '프레스티지'
-    /* 결제하기까지 자동으로 누른다. 결제창에서 다시 본인 인증이 필요하므로
-     * 여기서 바로 돈이 빠지지는 않는다. 패널 체크박스로 끌 수 있다.
+    /* 결제하기까지 자동으로 누른다 (사용자 요청으로 기본 켜짐).
+     * 결제창에서 다시 본인 인증이 필요하므로 여기서 바로 돈이 빠지지는 않는다.
+     * 패널 체크박스로 끌 수 있다.
      *
      * 주의: 실측에서 이 단계가 실행됐는데도 결제창이 뜨지 않은 적이 있다.
      * 브라우저가 스크립트로 만든 클릭(isTrusted=false)에는 사용자 조작 권한을
@@ -463,10 +517,6 @@ try {
      * 그래서 재생이 끝나면 결제창이 실제로 떴는지 확인하라고 알린다. */
     allowPay: true,
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
-    resyncAfterMs: 700,   // 이만큼 막히면 "이미 지나간 단계인가?" 하고 뒤를 넘겨본다.
-                          // 자동클릭 엔진이 같은 버튼을 먼저 눌러버리는 일이 잦아서
-                          // 길게 잡으면 그만큼 그냥 버려진다
-    lookahead: 3,         // 몇 단계 앞까지 넘겨볼지
     gapMs: 80,            // 클릭 사이 최소 간격
     settleMs: 250,        // 이만큼 화면이 잠잠해야 다음 단계를 누른다
     maxSettleMs: 2500,    // 계속 바뀌기만 하면 이 시간 뒤에는 그냥 누른다
@@ -610,6 +660,7 @@ try {
   var retries = 0;
   var blockedEl = null;   // 찾았지만 무언가에 가려 못 누르는 요소
   var scrollClicks = 0;   // 이번 스크롤 단계에서 몇 번 눌렀는지
+  var ensureOpened = false;  // ensure 단계에서 목록을 열어둔 상태인지
   var OURS = '#ke-hud, #ke-editor, #ke-export';
   new MutationObserver(function (muts) {
     for (var i = 0; i < muts.length; i++) {
@@ -666,12 +717,21 @@ try {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return; }
     S.recording = false;
     S.playing = true;
-    if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.skipped = 0; S.skippedList = []; }
+    if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.problem = false; }
+    scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
+    ensureOpened = false;
     retries = 0;
     waitingSince = 0;
     save();
     log('재생 시작 (' + (S.idx + 1) + '/' + S.steps.length + ')');
   }
+  /* 재생을 끝내며 결과를 알린다. 문제가 있으면 message 에 그 사실이 남아
+   * hud 의 알림 판정이 ★완료★ 대신 ⚠멈춤⚠ 을 내도록 한다. */
+  function finish(why, problem) {
+    S.problem = !!problem;
+    pause(why);
+  }
+
   function pause(why) {
     S.playing = false;
     S.playAfterReload = false;
@@ -690,8 +750,8 @@ try {
     S.idx = 0;
     S.playAfterReload = true;
     S.startedAt = Date.now();   // 소요시간은 "발사 시점" 부터 센다 (새로고침 포함)
-    S.skipped = 0;
-    S.skippedList = [];
+    S.problem = false;
+    scrollClicks = 0;
     save();
     log('새로고침 후 처음부터 재생 예약됨');
     return true;
@@ -712,41 +772,19 @@ try {
   function locate(step) {
     if (step.dynamicDate) return U.findLatestOpenDate(step.idPrefix);
     if (step.dynamicCabin) return U.findCabin(S.cabin);
-    return U.findEl(step.sel, step.text, { selectorOnly: step.selectorOnly });
-  }
-
-  /* 막혔을 때 "이미 지나간 단계"인지 확인한다.
-   * 자동클릭 엔진이 같은 확인 버튼을 먼저 눌러버리거나, 사이트가 화면 하나를 건너뛰면
-   * 녹화한 요소는 영영 안 나타난다. 그때 20초를 버리는 대신, 뒤쪽 단계의 요소가 이미
-   * 보이면 거기로 따라잡는다. 녹화는 정답 스크립트가 아니라 안내로 취급하는 쪽이 맞다.
-   * 단, 결제 단계로는 절대 건너뛰지 않는다 (순서대로 도달했을 때만 누른다). */
-  function resync() {
-    /* 모달이 떠 있으면 그 뒤 화면의 버튼들이 "보이기" 때문에, 그것만 보고 건너뛰면
-     * 팝업이 열린 채로 끝까지 달려가 "완료" 라고 거짓 보고를 한다(소리는 나는데
-     * 화면은 위험품 팝업에서 멈춰 있는 증상). 실제로 그 좌표에서 잡히는지(hittable)
-     * 까지 확인해야 한다. */
-    var end = Math.min(S.idx + 1 + S.lookahead, S.steps.length);
-    for (var k = S.idx + 1; k < end; k++) {
-      var nx = S.steps[k];
-      if (isPay(nx)) return false;
-      var nel = locate(nx);
-      /* 화면 밖이면 strict 판정이 무조건 실패해서, 정작 건너뛰어야 할 때도 못 건너뛴다.
-       * 스크롤로 화면에 넣어보고 나서 판정한다 (스크롤은 아무것도 누르지 않는다). */
-      if (nel) { try { nel.scrollIntoView({ block: 'center' }); } catch (e) {} }
-      if (nel && U.hittable(nel, true)) {   // strict: 확실할 때만 건너뛴다
-        log('단계 ' + (S.idx + 1) + ' 건너뜀 (이미 지나간 것으로 보임) -> ' + (k + 1) + '단계로');
-        S.skipped = (S.skipped || 0) + (k - S.idx);
-        if (!S.skippedList) S.skippedList = [];
-        for (var j = S.idx; j < k; j++) {
-          S.skippedList.push((j + 1) + '번 "' + String(S.steps[j].text || S.steps[j].sel).slice(0, 18) + '"');
-        }
-        S.idx = k;
-        waitingSince = 0;
-        save();
-        return true;
+    var el = U.findEl(step.sel, step.text, { selectorOnly: step.selectorOnly });
+    if (el) return el;
+    /* alt: 화면에 따라 있을 수도 없을 수도 있는 선택지. 앞에서부터 찾아지는 것 하나만
+     * 누른다. 결제수단이 그렇다 - 가는 편에는 네이버페이가 있는데 오는 편에는 없어서
+     * 신용카드로 가야 한다. 둘 다 누르면 마지막 것으로 바뀌므로 하나만 골라야 한다. */
+    if (step.alt) {
+      for (var i = 0; i < step.alt.length; i++) {
+        var a = step.alt[i];
+        el = U.findEl(a.sel, a.text, { selectorOnly: a.selectorOnly });
+        if (el) return el;
       }
     }
-    return false;
+    return null;
   }
 
   function tick() {
@@ -773,6 +811,53 @@ try {
       if (quiet < S.settleMs && now - lastClickAt < S.maxSettleMs) return;
     }
 
+    /* ensure 단계: "지금 값이 want 면 그대로 두고, 아니면 골라서 맞춘다".
+     * 통화(KRW/USD)처럼 화면 상태에 따라 눌러야 할 수도 아닐 수도 있는 것에 쓴다.
+     * 좌석 등급을 바꿀 때마다 통화가 되돌아가는 경우가 있어서, 매번 확인해야 한다.
+     *   1) 컨트롤 라벨에 want 가 이미 있으면 -> 통과
+     *   2) 없으면 컨트롤을 눌러 목록을 연다
+     *   3) 목록에서 want 가 든 항목을 눌러 맞춘다 */
+    if (step.ensure) {
+      var ctrl = U.findEl(step.sel, step.text, { selectorOnly: step.selectorOnly })
+                 || U.findContaining(step.text);   // '통화 KRW' 처럼 라벨이 상태를 담는다
+      if (ctrl && U.label(ctrl).indexOf(step.ensure) !== -1) {
+        S.idx++; retries = 0; waitingSince = 0; ensureOpened = false; save();
+        log('재생 ' + S.idx + '/' + S.steps.length + ': 이미 ' + step.ensure
+            + ' 이라 그대로 둠  [' + secs(elapsed()) + ']');
+        return;
+      }
+      if (!ensureOpened) {
+        if (!ctrl) {   // 컨트롤 자체를 아직 못 찾음 -> 아래 공통 대기 로직으로
+          if (!waitingSince) waitingSince = now;
+          if (now - waitingSince > S.stepTimeoutMs) {
+            finish('단계 ' + (S.idx + 1) + ' 통화 컨트롤을 못 찾음: ' + (step.text || step.sel), true);
+          }
+          return;
+        }
+        if (!U.hittable(ctrl)) return;
+        lastClickAt = now;
+        U.fireClick(ctrl);
+        ensureOpened = true;
+        log('통화 목록을 엽니다 (지금 값이 ' + step.ensure + ' 가 아님)');
+        return;
+      }
+      // 목록이 열렸다 - want 가 든 항목을 고른다
+      var opt = U.findContaining(step.ensure, ctrl);
+      if (!opt) {
+        if (now - waitingSince > S.stepTimeoutMs) {
+          finish('통화 목록에서 ' + step.ensure + ' 를 못 찾았습니다 - 직접 선택하세요', true);
+        }
+        return;
+      }
+      lastClickAt = now;
+      U.fireClick(opt);
+      ensureOpened = false;
+      S.idx++; retries = 0; waitingSince = 0; save();
+      log('재생 ' + S.idx + '/' + S.steps.length + ': ' + step.ensure
+          + ' 로 맞춤  [' + secs(elapsed()) + ']');
+      return;
+    }
+
     var el = locate(step);
 
     /* 찾았어도 "지금 누를 수 있는" 상태여야 한다.
@@ -791,6 +876,7 @@ try {
      * 실제로 그렇게 꺼졌고, 이후 모달이 안 떠 흐름이 통째로 막혔다. 켜져 있으면 넘어간다. */
     if (el && TOGGLEY.test(step.text || '') && U.alreadyOn(el)) {
       S.idx++;
+      waitingSince = 0;   // 다음 단계는 제한시간을 새로 받아야 한다
       retries = 0;
       save();
       log('재생 ' + S.idx + '/' + S.steps.length + ': 이미 켜져 있어 누르지 않음 - '
@@ -802,6 +888,7 @@ try {
                      && (!el || !SCROLLY.test(U.label(el)));
     if (scrollDone) {
       scrollClicks = 0;
+      waitingSince = 0;   // 다음 단계는 제한시간을 새로 받아야 한다
       S.idx++;
       /* 녹화에는 스크롤이 여러 번 찍혀 있지만 위에서 버튼이 사라질 때까지 눌렀으므로
        * 뒤따르는 같은 스크롤 단계는 이미 소화된 것이다. 건너뜀으로 세면 멀쩡한 재생이
@@ -820,6 +907,12 @@ try {
       return;
     }
 
+    /* hittable 은 화면 밖이면 판정을 보류하고 통과시킨다. 그런데 fireClick 은 요소에
+     * 이벤트를 직접 쏘므로, 그대로 두면 모달이 떠 있어도 화면 밖 버튼은 그냥 눌린다
+     * (모달 가드가 통째로 우회된다). 스크롤해서 화면에 넣은 뒤 다시 판정한다. */
+    if (el && !U.hittable(el, true)) {
+      try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
+    }
     if (el && !U.hittable(el)) {
       blockedEl = el;
       el = null;
@@ -831,7 +924,15 @@ try {
      * 안 맞으면 누르지 않고 멈춘다 - 엉뚱한 날짜로 마일리지가 빠지는 게 최악이다. */
     if (step.dynamicDate && el && S.expectDate) {
       var got = U.label(el);
-      if (got.indexOf(S.expectDate) === -1) {
+      /* "08-27", "8/27", "08월 27일" 을 모두 같은 날로 본다. 예전에는 입력 문자열이
+       * 라벨에 그대로 들어있는지만 봐서, 형식이 조금만 달라도 무조건 멈췄다. */
+      var same = U.sameDate(S.expectDate, got);
+      if (same === null) {
+        pause('목표 날짜를 해석하지 못했습니다 (예: 08-27) - 입력: ' + S.expectDate
+              + ' / 감지: ' + got.slice(0, 30));
+        return;
+      }
+      if (!same) {
         pause('목표 날짜(' + S.expectDate + ')와 다릅니다 - 감지된 최신 오픈일: ' + got.slice(0, 30));
         return;
       }
@@ -842,7 +943,6 @@ try {
        * 바뀐 것일 수 있다. 그래도 팝업은 끝까지 내려야 [확인] 이 열리므로, 버튼과
        * 무관하게 스크롤 자체는 계속 밀어준다. */
       if (SCROLLY.test(step.text || '')) U.scrollToBottom();
-      if (now - waitingSince > S.resyncAfterMs && resync()) return;
       if (now - waitingSince > S.retryClickMs && retryPrevClick(now)) return;
       if (now - waitingSince > S.stepTimeoutMs) {
         // 스크린샷 한 장으로 원인 파악이 되도록 패널 상태줄에 진단 요약을 그대로 붙인다.
@@ -868,14 +968,6 @@ try {
 
     U.fireClick(el);
 
-    if (payBefore !== null) {
-      setTimeout(function () {
-        var o = S.lastOpen;
-        if (o && o.ok && o.at > payBefore) log('결제창이 열렸습니다 - 결제창에서 마무리하세요');
-        else log('결제하기를 눌렀지만 결제창이 열리지 않았습니다. '
-                 + '팝업 차단일 수 있으니 결제 버튼을 직접 눌러주세요');
-      }, 1500);
-    }
 
     /* "아래로 스크롤" 은 버튼을 누르는 것만으로는 불안하다. 스크롤이 진행되면 버튼
      * 자체가 위로 밀리거나 화면 밖으로 나가서 클릭이 빗나가고, 팝업이 끝까지 안 내려가
@@ -884,7 +976,11 @@ try {
       U.scrollToBottom();
       scrollClicks++;
       if (scrollClicks < 20) { save(); return; }   // 버튼이 사라질 때까지 같은 단계를 반복
+      /* 20번을 눌렀는데도 버튼이 그대로면 끝까지 내려갔는지 확인하지 못한 것이다.
+       * 그냥 넘어가되 완료로 보고하지는 않는다. */
       scrollClicks = 0;
+      S.problem = true;
+      log('스크롤을 20번 눌렀는데도 버튼이 남아 있습니다 - 팝업을 확인하세요');
     }
 
     S.idx++;
@@ -893,13 +989,22 @@ try {
     log('재생 ' + S.idx + '/' + S.steps.length + ': ' + (step.text || step.sel).slice(0, 30)
         + '  [' + secs(elapsed()) + ']');
     if (S.idx >= S.steps.length) {
-      /* 건너뛴 단계가 있으면 "완료" 라고만 하면 안 된다. 자동클릭 엔진이 대신 눌러서
-       * 정상인 경우도 있지만, 화면이 실제로는 안 넘어갔을 수도 있다. 반드시 눈으로
-       * 확인하라고 알린다. */
-      pause(S.skipped
-        ? '단계 끝까지 진행 - 건너뜀 ' + S.skipped + '개: '
-            + (S.skippedList || []).join(', ') + '. 화면을 확인하세요'
-        : '전체 단계 완료');
+      /* 결제 단계였다면 "눌렀다" 와 "결제창이 떴다" 는 전혀 다르다. 팝업이 차단되면
+       * 로그만 남고 창은 안 뜬다. 여기서 바로 완료를 알리면 성공음이 울리고 제목이
+       * ★완료★ 로 바뀌어, 정작 결제창이 없는데 사용자가 자리를 뜬다.
+       * 창이 떴는지 확인한 뒤에 알린다. */
+      if (payBefore !== null) {
+        S.playing = false;      // 더 이상 tick 이 돌지 않게 하되, 알림은 판정 후에
+        save();
+        setTimeout(function () {
+          var o = S.lastOpen;
+          if (o && o.ok && o.at > payBefore) finish('전체 단계 완료 - 결제창이 열렸습니다');
+          else finish('결제하기를 눌렀지만 결제창이 열리지 않았습니다. '
+                      + '팝업 차단일 수 있으니 결제 버튼을 직접 눌러주세요', true);
+        }, 1500);
+        return;
+      }
+      finish('전체 단계 완료');
     }
   }
 
@@ -1361,17 +1466,40 @@ try {
         cdEl.textContent = 'T+' + Math.floor(-d / 1000) + 's';
         cdEl.style.color = '#c00';
       }
+      /* 안전망: 카운트다운 루프에서도 발사한다.
+       * schedule() 은 setTimeout 을 최대 60초짜리로 걸어두는데, 탭이 백그라운드면
+       * 크롬이 그걸 1분에 한 번꼴로 늦춘다. 그러면 정시를 한참 넘겨서야 깨어난다.
+       * 여기서 한 번 더 보면, 타이머가 늦어도 tick 이 도는 순간 바로 쏜다.
+       * fire() 는 무장을 풀고 새로고침하므로 두 번 쏘지 않는다. */
+      if (S.armed && d <= 0) fire('정시');
     } else {
       cdEl.textContent = '오픈시각 미설정';
+    }
+
+    /* 백그라운드 탭은 타이머가 느려진다. 무장 중이면 눈에 띄게 알린다. */
+    if (S.armed && document.hidden) {
+      setStatus('⚠ 탭이 백그라운드입니다 - 타이머가 늦어질 수 있으니 이 탭을 앞에 두세요');
     }
   }
 
   function schedule() {
     if (timer) { clearTimeout(timer); timer = null; }
     var T = targetMs();
-    if (isNaN(T)) { toast('오픈시각 형식 오류 (예: 2026-08-22 10:00:00)', true); return; }
+    /* 예약에 실패하면 무장을 반드시 풀어야 한다. 안 그러면 버튼은 '■ 정지' 인데
+     * 타이머는 없는 상태가 되어, 사용자가 무장된 줄 알고 기다리다 놓친다. */
+    if (isNaN(T)) {
+      S.armed = false; save(); render();
+      toast('오픈시각 형식 오류 (예: 2026-08-22 10:00:00) - 무장 해제됨', true);
+      setStatus('무장 해제됨 - 오픈시각을 확인하세요');
+      return;
+    }
     var wait = T - S.leadMs - nowSrv();
-    if (wait < 0) { toast('이미 지난 시각입니다', true); return; }
+    if (wait < 0) {
+      S.armed = false; save(); render();
+      toast('이미 지난 시각입니다 - 무장 해제됨', true);
+      setStatus('무장 해제됨 - 오픈시각이 이미 지났습니다');
+      return;
+    }
     // 남은 시간이 길면 쪼개서 재계산 (setTimeout 드리프트 보정)
     (function step() {
       var left = targetMs() - S.leadMs - nowSrv();
@@ -1449,7 +1577,7 @@ try {
          * 문구 매칭에 기대면 '건너뛰었습니다' -> '건너뜀' 처럼 표현만 바뀌어도
          * 조용히 ★완료★ 로 잘못 보고하게 된다. */
         var ok = st.steps.length > 0 && st.idx >= st.steps.length
-                 && !st.skipped && !/못 찾|다릅니다/.test(m);
+                 && !st.problem && !/못 찾|다릅니다/.test(m);
         notify(m, ok);
       }
     }
@@ -1507,7 +1635,7 @@ try {
       '<option value="일등석">일등석</option>' +
       '</select>' +
       '<label>목표 날짜 <span style="color:#999">(비우면 검사 안 함)</span></label>' +
-      '<input id="ke-expect" placeholder="08월 17일">' +
+      '<input id="ke-expect" placeholder="08-27">' +
       '<label style="display:flex;align-items:center;gap:5px;margin-top:6px;color:#c00">' +
       '<input type="checkbox" id="ke-allowpay" style="width:auto">' +
       '결제하기까지 자동 (결제창 열림)</label>' +
@@ -1594,7 +1722,7 @@ try {
           ? '목표 날짜 ' + R.state.expectDate + ' - 다르면 멈춥니다'
           : '목표 날짜 검사 끔');
       };
-      /* 기본은 꺼짐. 켜면 결제하기까지 눌러 결제창(네이버페이 등)을 띄운다.
+      /* 기본은 켜짐 (사용자 요청). 켜면 결제하기까지 눌러 결제창(네이버페이 등)을 띄운다.
        * 결제창에서 다시 본인 인증이 필요하므로 여기서 바로 돈이 빠지지는 않지만,
        * 되돌리기 어려운 지점이라 매번 눈에 보이게 체크하도록 둔다. */
       root.querySelector('#ke-allowpay').onchange = function (e) {
@@ -1617,6 +1745,12 @@ try {
     render();
     setInterval(tick, 50);
     sync(false);
+
+    /* 무장은 localStorage 에 남지만 타이머는 문서마다 새로 만들어야 한다.
+     * 이게 없으면 08시에 무장해두고 09시 전에 페이지가 한 번이라도 다시 뜨는 순간
+     * (수동 새로고침 / 세션 갱신 / SPA 풀 로드) 타이머만 조용히 사라진다.
+     * 버튼은 '■ 정지' 로, 카운트다운은 계속 도는 채로 - 정시에 아무 일도 안 일어난다. */
+    if (S.armed) schedule();
   }
 
   /* document-start 에 주입되면 body 가 아직 없다. 게다가 SPA 가 화면을 갈아끼우면서
@@ -1718,7 +1852,7 @@ try {
     else if (e.key === 'Escape' && picking) { stopPick(); toast('집기 취소'); }
   }, true);
 
-  expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount,
+  expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount, save: save, schedule: schedule,
                      rehearse: rehearse,
                      offset: function () { return offsetMs; } });
   console.log('%c[KE_HUD] v1.1.0 loaded', 'color:#0b4da2;font-weight:bold');

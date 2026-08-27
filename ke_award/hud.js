@@ -175,17 +175,40 @@
         cdEl.textContent = 'T+' + Math.floor(-d / 1000) + 's';
         cdEl.style.color = '#c00';
       }
+      /* 안전망: 카운트다운 루프에서도 발사한다.
+       * schedule() 은 setTimeout 을 최대 60초짜리로 걸어두는데, 탭이 백그라운드면
+       * 크롬이 그걸 1분에 한 번꼴로 늦춘다. 그러면 정시를 한참 넘겨서야 깨어난다.
+       * 여기서 한 번 더 보면, 타이머가 늦어도 tick 이 도는 순간 바로 쏜다.
+       * fire() 는 무장을 풀고 새로고침하므로 두 번 쏘지 않는다. */
+      if (S.armed && d <= 0) fire('정시');
     } else {
       cdEl.textContent = '오픈시각 미설정';
+    }
+
+    /* 백그라운드 탭은 타이머가 느려진다. 무장 중이면 눈에 띄게 알린다. */
+    if (S.armed && document.hidden) {
+      setStatus('⚠ 탭이 백그라운드입니다 - 타이머가 늦어질 수 있으니 이 탭을 앞에 두세요');
     }
   }
 
   function schedule() {
     if (timer) { clearTimeout(timer); timer = null; }
     var T = targetMs();
-    if (isNaN(T)) { toast('오픈시각 형식 오류 (예: 2026-08-22 10:00:00)', true); return; }
+    /* 예약에 실패하면 무장을 반드시 풀어야 한다. 안 그러면 버튼은 '■ 정지' 인데
+     * 타이머는 없는 상태가 되어, 사용자가 무장된 줄 알고 기다리다 놓친다. */
+    if (isNaN(T)) {
+      S.armed = false; save(); render();
+      toast('오픈시각 형식 오류 (예: 2026-08-22 10:00:00) - 무장 해제됨', true);
+      setStatus('무장 해제됨 - 오픈시각을 확인하세요');
+      return;
+    }
     var wait = T - S.leadMs - nowSrv();
-    if (wait < 0) { toast('이미 지난 시각입니다', true); return; }
+    if (wait < 0) {
+      S.armed = false; save(); render();
+      toast('이미 지난 시각입니다 - 무장 해제됨', true);
+      setStatus('무장 해제됨 - 오픈시각이 이미 지났습니다');
+      return;
+    }
     // 남은 시간이 길면 쪼개서 재계산 (setTimeout 드리프트 보정)
     (function step() {
       var left = targetMs() - S.leadMs - nowSrv();
@@ -263,7 +286,7 @@
          * 문구 매칭에 기대면 '건너뛰었습니다' -> '건너뜀' 처럼 표현만 바뀌어도
          * 조용히 ★완료★ 로 잘못 보고하게 된다. */
         var ok = st.steps.length > 0 && st.idx >= st.steps.length
-                 && !st.skipped && !/못 찾|다릅니다/.test(m);
+                 && !st.problem && !/못 찾|다릅니다/.test(m);
         notify(m, ok);
       }
     }
@@ -321,7 +344,7 @@
       '<option value="일등석">일등석</option>' +
       '</select>' +
       '<label>목표 날짜 <span style="color:#999">(비우면 검사 안 함)</span></label>' +
-      '<input id="ke-expect" placeholder="08월 17일">' +
+      '<input id="ke-expect" placeholder="08-27">' +
       '<label style="display:flex;align-items:center;gap:5px;margin-top:6px;color:#c00">' +
       '<input type="checkbox" id="ke-allowpay" style="width:auto">' +
       '결제하기까지 자동 (결제창 열림)</label>' +
@@ -408,7 +431,7 @@
           ? '목표 날짜 ' + R.state.expectDate + ' - 다르면 멈춥니다'
           : '목표 날짜 검사 끔');
       };
-      /* 기본은 꺼짐. 켜면 결제하기까지 눌러 결제창(네이버페이 등)을 띄운다.
+      /* 기본은 켜짐 (사용자 요청). 켜면 결제하기까지 눌러 결제창(네이버페이 등)을 띄운다.
        * 결제창에서 다시 본인 인증이 필요하므로 여기서 바로 돈이 빠지지는 않지만,
        * 되돌리기 어려운 지점이라 매번 눈에 보이게 체크하도록 둔다. */
       root.querySelector('#ke-allowpay').onchange = function (e) {
@@ -431,6 +454,12 @@
     render();
     setInterval(tick, 50);
     sync(false);
+
+    /* 무장은 localStorage 에 남지만 타이머는 문서마다 새로 만들어야 한다.
+     * 이게 없으면 08시에 무장해두고 09시 전에 페이지가 한 번이라도 다시 뜨는 순간
+     * (수동 새로고침 / 세션 갱신 / SPA 풀 로드) 타이머만 조용히 사라진다.
+     * 버튼은 '■ 정지' 로, 카운트다운은 계속 도는 채로 - 정시에 아무 일도 안 일어난다. */
+    if (S.armed) schedule();
   }
 
   /* document-start 에 주입되면 body 가 아직 없다. 게다가 SPA 가 화면을 갈아끼우면서
@@ -532,7 +561,7 @@
     else if (e.key === 'Escape' && picking) { stopPick(); toast('집기 취소'); }
   }, true);
 
-  expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount,
+  expose('KE_HUD', { sync: sync, fire: fire, state: S, mount: mount, save: save, schedule: schedule,
                      rehearse: rehearse,
                      offset: function () { return offsetMs; } });
   console.log('%c[KE_HUD] v1.1.0 loaded', 'color:#0b4da2;font-weight:bold');

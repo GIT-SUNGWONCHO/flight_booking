@@ -50,22 +50,25 @@ def main() -> int:
                 {sel:'#존재하지않음', text:'있을리없는라벨입니다', tag:'button', url:'/x', selectorOnly:true},
                 {sel:"button.date[data-i='6']", text:'16(월)', tag:'button', url:'/x'}
               ];
-              R.state.resyncAfterMs = 250; R.state.idx = 0; R.state.startedAt = 0;
-              R.state.skipped = 0; R.state.skippedList = [];
+              R.state.stepTimeoutMs = 2500; R.state.idx = 0; R.state.startedAt = 0;
+              R.state.problem = false;
               R.play();
             }""")
 
             pg.wait_for_function("() => !window.KE_REC.state.playing", timeout=20000)
-            st = pg.evaluate("() => ({msg: KE_REC.state.message, list: KE_REC.state.skippedList})")
-            check(bool(st["list"]) and "2번" in st["list"][0],
-                  "건너뛴 단계를 이름까지 기록", str(st["list"]))
-            check("2번" in (st["msg"] or ""),
-                  "완료 메시지가 어느 단계를 건너뛰었는지 밝힘", st["msg"])
+            st = pg.evaluate("() => ({msg: KE_REC.state.message, problem: KE_REC.state.problem,"
+                             " idx: KE_REC.state.idx})")
+            # 못 찾는 단계는 건너뛰지 않고 멈춘다. 조용히 건너뛰면 동의 같은 필수
+            # 단계가 통째로 빠진 채 "완료" 로 보고된다(실측 사고).
+            check(st["problem"] is False, f"막힌 건 problem 이 아니라 정지로 다룬다 (problem={st['problem']})")
+            check(st["idx"] == 1, f"못 찾은 단계에서 멈춤 (idx={st['idx']})")
+            check("못 찾음" in (st["msg"] or ""),
+                  "어느 단계를 왜 못 찾았는지 알림", st["msg"])
 
             # 제목 표시는 페이지 이동 전에 봐야 한다 (이동하면 원래 제목으로 돌아감).
             # 판정이 메시지 문구 매칭이면 표현만 바꿔도 조용히 거짓 완료가 된다.
             title = pg.title()
-            check(title.startswith("⚠멈춤⚠"), "건너뜀이 있으면 제목이 ⚠멈춤⚠", title[:40])
+            check(title.startswith("⚠멈춤⚠"), "막히면 제목이 ⚠멈춤⚠", title[:40])
             print(f"      제목  : {title[:40]}")
             print(f"      메시지: {st['msg']}")
         finally:

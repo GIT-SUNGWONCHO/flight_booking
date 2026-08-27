@@ -54,7 +54,7 @@ def main() -> int:
                 {sel:'#pay',           text:'결제하기',     tag:'button', url:'/x'}
               ];
               R.state.allowPay = true;
-              R.state.idx = 0; R.state.startedAt = 0; R.state.skipped = 0; R.state.skippedList = [];
+              R.state.idx = 0; R.state.startedAt = 0; R.state.problem = false;
               R.state.stepTimeoutMs = 6000;
               R.play();
             }""")

@@ -180,6 +180,23 @@
     return null;
   }
 
+  /** 라벨에 text 가 "들어 있는" 요소를 찾는다.
+   * ensure 컨트롤은 라벨이 상태를 담는다("통화 KRW" / "통화 USD"). 정확 일치로는
+   * 영원히 못 찾으므로 부분 일치가 필요하다. 여러 개면 라벨이 가장 짧은 것
+   * (= 가장 구체적인 요소)을 고른다. */
+  function findContaining(text, exclude) {
+    if (!text) return null;
+    var all = candidates(document), best = null, bestLen = 1e9;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el === exclude || !visible(el) || inChrome(el)) continue;
+      var t = label(el);
+      if (t.indexOf(text) === -1) continue;
+      if (t.length < bestLen) { best = el; bestLen = t.length; }
+    }
+    return best;
+  }
+
   /** 재생이 단계를 못 찾고 멈췄을 때 왜 못 찾았는지 - 셀렉터가 몇 개 매치됐는지,
    * 텍스트가 일치하는 후보가 있는지 - 를 요약한다. 스크린샷 한 장으로 원인 파악이
    * 되도록 패널 상태줄에 그대로 얹는 용도. */
@@ -268,15 +285,36 @@
     try { el.click(); } catch (e) { dispatch(MouseEvent, 'click', { button: 0 }); }
   }
 
-  var FARE_WORDS = /(일반석|프리미엄|프레스티지|일등석)/;
+  /** 라벨에서 월/일을 뽑아 "MM-DD" 로 만든다. "16 08월 16일 (월) , 성수기 일반석"
+   * 같은 라벨에서 08-16 을 얻는다. 못 뽑으면 null. */
+  function monthDay(text) {
+    var t = String(text || '');
+    /* 연-월-일이 먼저다. "2027-08-22" 에 월-일 패턴을 먼저 대면 "27-08" 을 집어
+     * 27월로 읽고 버린다. */
+    var m = t.match(/(\d{4})\s*[-\/.]\s*(\d{1,2})\s*[-\/.]\s*(\d{1,2})/);   // 2027-08-22
+    if (m) m = [m[0], m[2], m[3]];
+    if (!m) m = t.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);                   // 08월 16일
+    if (!m) m = t.match(/(\d{1,2})\s*[-\/.]\s*(\d{1,2})/);                   // 08-16, 8/16
+    if (!m) return null;
+    var mo = +m[1], d = +m[2];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    return ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2);
+  }
 
-  /** 특정 날짜를 하드코딩하지 않고, 달력에서 "예약 가능한 것 중 가장 나중(=제일 늦게
-   * 열린) 날짜" 를 찾는다. 마일리지 좌석은 매일 09:00 KST 에 하루치씩 새로 열리므로,
-   * 이 방식이면 스텝을 매일 다시 지정할 필요가 없다.
-   * idPrefix 로 시작하는 id 를 가진 셀들을 훑어서, 요금등급 글자(일반석/프레스티지 등)
-   * 가 붙어있는(=예약 가능한) 것들 중 DOM 순서상 마지막(=달력에서 가장 나중 날짜)을
-   * 반환한다. 요일만 있고 요금 정보가 없는 셀(아직 안 열렸거나 그 요일 운항이 없는
-   * 날)은 자동으로 제외된다. */
+  /** 목표 날짜 입력이 감지된 셀과 같은 날인가. "08-27", "8/27", "08월 27일" 모두 받는다. */
+  function sameDate(expect, labelText) {
+    var a = monthDay(expect), b = monthDay(labelText);
+    if (!a || !b) return null;    // 판정 불가 - 호출자가 결정
+    return a === b;
+  }
+
+  /** 달력에서 가장 나중(=제일 늦게 열린) 날짜 셀을 찾는다.
+   *
+   * 예전에는 요금등급 글자(일반석/프레스티지)가 붙은 셀만 후보로 삼았다. 그런데 그
+   * 마커는 화면이 다 그려진 뒤에야 붙는 경우가 있어서, 재생이 그 전에 훑으면 하루
+   * 이틀 앞선 날짜를 골랐다(실측: 22일이어야 하는데 20일이 선택됨).
+   * 등급 마커와 무관하게 "날짜 숫자가 있는 마지막 셀" 을 고른다. 엉뚱한 날 예매는
+   * 목표 날짜 검사가 막는다 - 그게 훨씬 확실한 방어선이다. */
   function findLatestOpenDate(idPrefix) {
     idPrefix = idPrefix || 'dep-fare-';
     var list;
@@ -286,8 +324,10 @@
       var el = list[i];
       if (!visible(el)) continue;
       if (el.getAttribute('aria-disabled') === 'true' || el.disabled) continue;
-      if (/disable|unavail|soldout/i.test(el.className || '')) continue;
-      if (FARE_WORDS.test(label(el))) best = el;
+      var cls = typeof el.className === 'string' ? el.className : '';
+      if (/disable|unavail|soldout/i.test(cls)) continue;
+      if (!/\d/.test(label(el))) continue;    // 달력 여백 칸(빈 셀) 제외
+      best = el;
     }
     return best;
   }
@@ -343,6 +383,7 @@
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
     findLatestOpenDate: findLatestOpenDate, inChrome: inChrome, realTarget: realTarget,
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
+    monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     alreadyOn: alreadyOn
   };
   try { W.KE_UTIL = U; } catch (e) {}

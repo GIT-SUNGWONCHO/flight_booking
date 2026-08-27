@@ -54,7 +54,7 @@ def main() -> int:
                 {sel:'#contact', text:'확인', tag:'button', url:'/x'},
                 {sel:'#next',    text:'다음', tag:'button', url:'/x'}
               ];
-              R.state.idx = 0; R.state.startedAt = 0; R.state.skipped = 0; R.state.skippedList = [];
+              R.state.idx = 0; R.state.startedAt = 0; R.state.problem = false;
               R.state.stepTimeoutMs = 8000;
               R.play();
             }""")
@@ -78,7 +78,7 @@ def main() -> int:
                 {sel:'#agree',        text:'동의', tag:'button', url:'/x'},
                 {sel:'#절대없는버튼',   text:'있을리없는라벨', tag:'button', url:'/x', selectorOnly:true}
               ];
-              R.state.idx = 0; R.state.startedAt = 0; R.state.skipped = 0; R.state.skippedList = [];
+              R.state.idx = 0; R.state.startedAt = 0; R.state.problem = false;
               R.state.stepTimeoutMs = 3000;
               R.play();
             }""")

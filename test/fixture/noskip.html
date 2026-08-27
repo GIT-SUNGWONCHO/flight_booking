@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8"><title>건너뛰기 금지 시뮬레이터</title>
+<style>body{font:14px sans-serif;padding:20px}
+ button{padding:8px 14px;margin:4px;border:1px solid #333;background:#fff}
+ button[aria-pressed="true"]{background:#222;color:#fff}
+ #m{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center}
+ #m.on{display:flex} .box{background:#fff;padding:20px;border-radius:8px}</style>
+<body>
+<!-- 실측 사고 재현: #btnConfirm 은 모달이 닫혀 있어도 DOM 에 남아 있다.
+     예전 재생은 "확인이 보이니 동의는 이미 지나갔겠지" 하고 동의를 통째로 건너뛰었다.
+     동의 버튼은 조금 늦게 나타난다 (섹션이 나중에 그려지는 상황). -->
+<div id="host"></div>
+<div id="m"><div class="box"><h3>약관</h3>
+  <button id="btnConfirm">확인</button></div></div>
+<script>
+window.__agreeClicks = 0; window.__confirmClicks = 0;
+// 동의 버튼은 1.2초 뒤에야 나타난다
+setTimeout(function () {
+  document.getElementById('host').innerHTML =
+    '<button id="agree" aria-pressed="false">동의</button>';
+  document.getElementById('agree').onclick = function () {
+    window.__agreeClicks++;
+    this.setAttribute('aria-pressed', 'true');
+    document.getElementById('m').className = 'on';
+  };
+}, 1200);
+document.getElementById('btnConfirm').onclick = function () {
+  window.__confirmClicks++;
+  document.getElementById('m').className = '';
+};
+</script>
+</body>

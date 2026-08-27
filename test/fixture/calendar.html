@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8"><title>달력 시뮬레이터</title>
+<style>body{font:14px sans-serif;padding:20px}
+ td{border:1px solid #ddd;padding:10px;min-width:60px}
+ .disabled{color:#ccc}</style>
+<body>
+<!-- 실측: 22일이 가장 나중 날짜인데 20일이 선택됐다. 요금등급 마커(E/P)가 화면이
+     다 그려진 뒤에야 붙어서, 그 전에 훑으면 마커가 붙은 마지막 셀(20일)을 골랐다.
+     여기서는 21/22일의 마커가 늦게(600ms) 붙는 상황을 만든다. -->
+<table><tr>
+  <td id="dep-fare-3-1">19 08월 19일 (목) , 성수기 일반석</td>
+  <td id="dep-fare-3-2">20 08월 20일 (금) , 성수기 일반석</td>
+  <td id="dep-fare-3-3">21 08월 21일 (토)</td>
+  <td id="dep-fare-3-4">22 08월 22일 (일)</td>
+  <td id="dep-fare-3-5" class="disabled" aria-disabled="true">23 08월 23일 (월) , 매진</td>
+  <td id="dep-fare-3-6"></td>
+</tr></table>
+<script>
+setTimeout(function () {
+  document.getElementById('dep-fare-3-3').textContent = '21 08월 21일 (토) , 성수기 일반석';
+  document.getElementById('dep-fare-3-4').textContent = '22 08월 22일 (일) , 성수기 프레스티지석';
+}, 600);
+</script>
+</body>
