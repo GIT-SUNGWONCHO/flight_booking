@@ -116,6 +116,7 @@
     fixSince: 0,
     fixClickAt: 0,        // 날짜를 누른 시각. 이후에 온 응답만 근거로 삼는다
     fixOpens: 0,          // 날짜를 몇 번 눌러봤나 (멈출 때 이유에 쓴다)
+    byCause: {},          // 원인별 누적 시간. '어디를 손대야 하는가' 를 바로 보여준다
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
     /* 녹화할 때의 창 너비. 대한항공 화면은 반응형이라 창이 좁아지면 모바일
      * 레이아웃으로 바뀌고, 그러면 셀렉터도 라벨도 달라진다 - 위험품 안내 모달은
@@ -247,6 +248,11 @@
     var t = Date.now();
     if (S.stepStartedAt) {
       if (!S.times) S.times = [];
+      /* 원인별 합계도 같이 남긴다. 느린 단계 3개만 보면 "우리가 기다린 시간" 과
+       * "페이지가 느린 시간" 이 전체에서 각각 얼마인지 알 수 없어서, 어디를 손대야
+       * 하는지 매번 숫자를 다시 물어봐야 했다. */
+      if (!S.byCause) S.byCause = {};
+      for (var pk in phaseMs) S.byCause[pk] = (S.byCause[pk] || 0) + phaseMs[pk];
       var why = Object.keys(phaseMs)
         .filter(function (k) { return phaseMs[k] >= 250; })
         .sort(function (a, b) { return phaseMs[b] - phaseMs[a]; })
@@ -265,9 +271,16 @@
     var a = (S.times || []).slice();
     if (!a.length) return '';
     a.sort(function (x, y) { return y.ms - x.ms; });
-    return '  느린 단계: ' + a.slice(0, 3).map(function (x) {
+    var slow = '  느린 단계: ' + a.slice(0, 3).map(function (x) {
       return x.n + '.' + x.label + ' ' + (x.ms / 1000).toFixed(1) + 's'
            + (x.why ? ' (' + x.why + ')' : '');
+    }).join(', ');
+    /* 전체 합계. 느린 단계 3개만으로는 "우리가 기다린 시간" 이 전체에서 얼마인지
+     * 알 수 없다. 줄일 여지가 있는 쪽이 어디인지 이 줄 하나로 보인다. */
+    var c = S.byCause || {}, keys = Object.keys(c).sort(function (x, y) { return c[y] - c[x]; });
+    if (!keys.length) return slow;
+    return slow + '  |  전체: ' + keys.map(function (k) {
+      return k + ' ' + (c[k] / 1000).toFixed(1) + 's';
     }).join(', ');
   }
 
@@ -503,6 +516,7 @@
     S.problem = false;
     S.fixSince = 0; S.fixPhase = 0; S.fixClickAt = 0; S.fixOpens = 0;
     S.times = [];
+    S.byCause = {};
     S.stepStartedAt = Date.now();
     scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
     lastLabel = '';
