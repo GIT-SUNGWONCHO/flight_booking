@@ -770,6 +770,18 @@
         log('재생 ' + S.idx + '/' + S.steps.length + ': ' + how + '  [' + secs(elapsed()) + ']');
       };
 
+      /* 제한시간 시계를 여기서 한 번 돌린다.
+       *
+       * tooLong() 은 beganWaiting() 이 매 tick 불려야 시간이 쌓인다. 그런데 아래
+       * 네 갈래(목록에 없음 / 컨트롤 못 찾음 / 항목 못 찾음 / [적용] 못 찾음) 중
+       * 셋에 그게 빠져 있었다. waitedMs 가 0에서 안 올라가니 제한시간에 영영 안
+       * 걸리고, pause/finish 가 안 불려 소리도 제목도 안 바뀐다 - 화면에는
+       * "재생 중" 만 뜬 채 통화 단계에서 영원히 멈춘다.
+       *
+       * '가려진 시간은 빼고 센다' 로 바꾸면서 일부 경로에만 연결한 내 실수다.
+       * 갈래마다 챙기지 말고 들어오는 길목에서 한 번 돌린다. */
+      beganWaiting(now);
+
       // --- 네이티브 select ---
       var nsel = ctrl && (ctrl.tagName === 'SELECT'
                           ? ctrl : (ctrl.querySelector && ctrl.querySelector('select')));
@@ -799,7 +811,6 @@
           return;
         }
         if (!ctrl) {
-          beganWaiting(now);
           /* optional: 이 화면에 아예 없을 수 있는 단계 (네이버페이로 결제하면
            * 카드 종류 드롭다운이 나타나지 않는다). 잠깐 기다려보고 없으면 넘어간다. */
           if (step.optional && waitedMs > (S.optionalMs || 400)) {
@@ -834,7 +845,11 @@
         }
         lastClickAt = now;
         U.fireClick(opt);
-        if (step.applySel || step.applyText) { ensurePhase = 2; waitingSince = now; return; }
+        /* 옛날에는 waitingSince 를 직접 넣었는데, 지금 제한시간은 waitedMs 를 본다.
+         * 그대로 두면 아무 효과 없는 죽은 줄이다. 시계를 새로 시작한다. */
+        if (step.applySel || step.applyText) {
+          ensurePhase = 2; stopWaiting(); beganWaiting(now); return;
+        }
         doneEnsure(step.ensure + ' 로 맞춤', true);
         return;
       }

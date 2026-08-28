@@ -98,6 +98,32 @@ def main() -> int:
                     check(took < 1.5, f"{cur_label}: 대기 없이 끝남 (실제 {took:.2f}s)")
                 check(st["idx"] == st["total"] and not st["problem"],
                       f"{cur_label}: 끝까지 진행 ({st['idx']}/{st['total']}, problem={st['problem']})")
+            # ---- 못 찾으면 영원히 기다리지 말고 사람을 부른다 ----
+            # tooLong() 은 beganWaiting() 이 매 tick 불려야 시간이 쌓인다. 통화 단계의
+            # 네 갈래 중 셋에 그게 빠져 있어서, 목록에 원하는 값이 없으면 waitedMs 가
+            # 0에서 안 올라가 제한시간에 영영 안 걸렸다. pause/finish 가 안 불리니
+            # 소리도 제목도 안 바뀌고, 화면에는 "재생 중" 만 뜬 채 영원히 멈춘다.
+            # '가려진 시간은 빼고 센다' 로 바꾸면서 일부 경로에만 연결한 실수다.
+            pg.goto(BASE)
+            pg.wait_for_function("() => !!window.KE_REC", timeout=20000)
+            pg.evaluate("""() => {
+              const S = window.KE_REC.state;
+              S.steps = [{ensure:'있을리없는통화', sel:'#currencyBtn', text:'통화',
+                          tag:'button', url:'/x',
+                          optionSel:'#nope-no-such-option', applySel:'#nope-apply'}];
+              S.stepTimeoutMs = 2000;
+              S.idx = 0; S.playing = false; S.problem = false;
+              window.KE_REC.save();
+              window.KE_REC.play();
+            }""")
+            pg.wait_for_function("() => !window.KE_REC.state.playing", timeout=15000)
+            st = pg.evaluate("() => ({problem: KE_REC.state.problem,"
+                             " msg: KE_REC.state.message})")
+            check(st["problem"] is True,
+                  "목록에 없으면 영원히 기다리지 않고 멈춘다 (무성 실패 방지)", str(st))
+            check("직접" in (st["msg"] or ""),
+                  "무엇을 직접 해야 하는지 말해준다", st["msg"])
+            print(f"      {st['msg']}")
         finally:
             ctx.close()
 

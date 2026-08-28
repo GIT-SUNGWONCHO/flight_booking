@@ -36,11 +36,12 @@ if [ "${1:-}" = "--all" ]; then exec ./run-tests.sh; fi
 #   deadclick  클릭이 씹혔을 때 되살리기. 대기 시간을 줄일수록 여기에 기댄다
 #   twoagree   동의 2개 + 스크롤. 실전에서 가장 자주 막히던 구간
 #   pagewait   페이지가 넘어가기 전에 다음 단계를 눌러버리지 않는가
+#   currency   통화 KRW 강제 + 못 찾았을 때 영원히 멈추지 않는가
 #
 # 나머지는 편집기 UI, 셀렉터 집기, 유저스크립트에 없는 코드 같은 것들이라
 # 푸시를 막을 이유가 없다. 그것들은 ./t.sh --all 로 가끔 돌린다.
 if [ "${1:-}" = "--gate" ]; then
-  set -- hud parity skipcal calendar deadclick twoagree pagewait
+  set -- hud parity skipcal calendar deadclick twoagree pagewait currency
 fi
 
 if [ "${1:-}" = "--list" ]; then
