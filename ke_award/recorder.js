@@ -688,6 +688,29 @@
     var step = S.steps[S.idx];
     if (!step) { pause('전체 단계 완료'); return; }
 
+    /* 페이지가 넘어가는 단계 바로 다음은, 새 화면이 뜬 뒤에 눌러야 한다.
+     *
+     * 실측(2026-08-28): 조회 화면에서 '다음'(5단계)을 누른 0.28초 뒤에 6단계 '확인'
+     * 이 아직 넘어가지 않은 조회 화면에서 눌렸다. 그 클릭은 곧 이어진 페이지 이동에
+     * 씻겨나갔고, 결제 화면에서는 6단계가 안 된 채 7단계를 기다려 영영 멈췄다.
+     * 화면이 잠잠해지길 기다리는 것(settle)으로 우연히 가려져 있던 구멍인데,
+     * 그 대기를 줄이자 드러났다.
+     *
+     * 단계마다 녹화된 url 이 있으니 추측할 필요가 없다. 앞 단계와 url 이 다르면
+     * 페이지 이동이 예정된 것이고, 그 화면이 뜨기 전에는 누르지 않는다. */
+    var prev = S.idx > 0 ? S.steps[S.idx - 1] : null;
+    if (prev && step.url && prev.url && prev.url !== step.url
+        && location.pathname.indexOf(step.url) < 0) {
+      phase('페이지 이동 대기', now);
+      beganWaiting(now);
+      if (tooLong(S.stepTimeoutMs)) {
+        pause('단계 ' + (S.idx + 1) + ' 은 ' + step.url + ' 화면의 단계인데'
+              + ' 지금은 ' + location.pathname + ' 입니다 - 화면을 확인하세요'
+              + hiddenNote());
+      }
+      return;
+    }
+
     if (isPay(step) && !S.allowPay) {
       pause('결제 단계입니다 - 직접 확인하고 누르세요');
       return;

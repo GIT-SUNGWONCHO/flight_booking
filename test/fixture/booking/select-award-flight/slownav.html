@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>느린 페이지 이동 (픽스처)</title>
+<h1>항공편 조회</h1>
+<!-- 실측(2026-08-28): [다음] 을 눌러 페이지가 넘어가기 전에 다음 단계 [확인] 이
+     아직 조회 화면인 상태에서 눌렸다. 그 클릭은 이동에 씻겨나가고, 새 화면에서는
+     그 단계가 안 된 채로 그 다음을 기다려 영영 멈췄다.
+     여기서는 이동이 늦게 일어나는 상황을 만든다. -->
+<button id="next">다음</button>
+<button id="submit-passenger-ADT-0">확인</button>   <!-- 결제 화면의 것과 같은 이름 -->
+<script>
+  window.__clicks = [];
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[id]');
+    if (t && t.id.indexOf('ke-') !== 0) window.__clicks.push(t.id);
+  }, true);
+  var nav = +(new URLSearchParams(location.search).get('nav') || 1500);
+  document.getElementById('next').addEventListener('click', function () {
+    setTimeout(function () { location.href = '/payment/gate/RT/NR'; }, nav);
+  });
+</script>

@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>결제 (픽스처)</title>
+<h1>여행정보 입력 및 결제</h1>
+<button id="submit-passenger-ADT-0">확인</button>
+<button id="submit-contact">확인</button>
+<script>
+  window.__clicks = [];
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[id]');
+    if (t && t.id.indexOf('ke-') !== 0) window.__clicks.push(t.id);
+  }, true);
+</script>
