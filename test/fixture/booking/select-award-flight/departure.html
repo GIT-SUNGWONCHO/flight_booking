@@ -84,7 +84,14 @@
     })(('0' + d).slice(-2));
     row.appendChild(td);
   }
+  /* deaf=N: 처음 N밀리초 동안은 날짜칸 클릭이 먹히지 않는다.
+     실제 화면이 그렇다 - 새로고침 직후에는 페이지 스크립트가 아직 클릭 핸들러를
+     붙이지 않아 첫 클릭이 예외도 없이 사라진다. 한 번만 누르고 기다리면 영원히
+     안 열린다(실측: 재생은 되는데 대기 시작은 여기서 멈췄다). */
+  var deaf = +(new URLSearchParams(location.search).get('deaf') || 0);
+  var born = Date.now();
   document.getElementById('depdate').addEventListener('click', function () {
+    if (Date.now() - born < deaf) return;      // 아직 안 붙은 셈
     document.getElementById('picker').style.display = '';
   });
   // nosearch=1: 조회 버튼 라벨이 우리가 아는 말이 아닌 경우를 흉내낸다

@@ -99,8 +99,16 @@
     fixPhase: 0,          // 0=달력 열기 1=날짜 누르기 2=서버 응답으로 확인
     fixSince: 0,
     fixClickAt: 0,        // 날짜를 누른 시각. 이후에 온 응답만 근거로 삼는다
+    fixOpenAt: 0,         // 달력을 열려고 마지막으로 누른 시각
+    fixOpens: 0,          // 몇 번 눌러봤나 (멈출 때 이유에 쓴다)
     fixSearchAt: 0,       // 조회 버튼을 누른 시각
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
+    /* 녹화할 때의 창 너비. 대한항공 화면은 반응형이라 창이 좁아지면 모바일
+     * 레이아웃으로 바뀌고, 그러면 셀렉터도 라벨도 달라진다 - 위험품 안내 모달은
+     * 넓은 화면에서는 [아래로 스크롤] 버튼이 있는데 좁은 화면에서는 아예 없다.
+     * 실측(2026-08-28): 창을 줄여놓고 돌렸더니 12단계에서 그 버튼을 못 찾고 멈췄다.
+     * 녹화 당시 너비를 남겨두고, 지금 그보다 많이 좁으면 미리 알린다. */
+    recordedWidth: 0,
     bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
   };
 
@@ -306,6 +314,7 @@
   document.addEventListener('click', onClick, true);
 
   function record() {
+    try { S.recordedWidth = window.innerWidth || 0; } catch (e) {}
     S.source = 'local';       // 이제부터는 이 브라우저에서 만든 것
     S.steps = [];
     S.recording = true;
@@ -322,6 +331,42 @@
 
   // ---- 재생 --------------------------------------------------------------
   var waitingSince = 0;
+
+  /* 기다린 시간을 '화면이 보이는 동안' 으로만 센다.
+   *
+   * 크롬은 가려지거나 최소화된 창의 타이머를 늦추는데, 늦춰지는 것은 우리 tick 만이
+   * 아니라 그 페이지 자신이다. 모달이 뜨는 데 20초가 넘게 걸리기도 한다. 그걸 벽시계로
+   * 재서 "요소를 못 찾음" 으로 끊으면, 화면을 다시 보는 순간 멀쩡히 있는 버튼을 두고
+   * 이미 멈춰 있다. 실측(2026-08-28): 창을 작게/가려둔 채 두면 12단계(아래로 스크롤)
+   * 에서 그렇게 멈췄고, 최대화하면 잘 됐다.
+   *
+   * 그래서 가려져 있던 시간은 인내심에서 빼고, 대신 얼마나 뺐는지 알려준다. */
+  var waitedMs = 0, hiddenMs = 0, lastWaitAt = 0;
+
+  function beganWaiting(now) {
+    if (!waitingSince) { waitingSince = now; waitedMs = 0; hiddenMs = 0; lastWaitAt = now; return; }
+    var d = now - lastWaitAt;
+    lastWaitAt = now;
+    if (d <= 0 || d > 2000) return;          // 스로틀링으로 크게 벌어진 간격은 버린다
+    if (document.hidden) hiddenMs += d; else waitedMs += d;
+  }
+  function stopWaiting() { waitingSince = 0; waitedMs = 0; hiddenMs = 0; lastWaitAt = 0; }
+  function tooLong(limit) { return waitedMs > limit; }
+  function hiddenNote() {
+    var n = hiddenMs > 1000
+      ? ' (창이 가려져 있던 ' + Math.round(hiddenMs / 1000) + '초는 빼고 셌습니다)'
+      : '';
+    /* 창이 좁으면 사이트가 모바일 화면으로 바뀌어 셀렉터도 라벨도 달라진다.
+     * '못 찾음' 의 가장 흔한 원인이므로 그 자리에서 짚어준다. */
+    try {
+      var w = window.innerWidth || 0, need = S.recordedWidth || 1200;
+      if (w && w < need * 0.85) {
+        n += ' — 창이 좁습니다(' + w + 'px). 모바일 화면으로 바뀌면 단계를 못 찾습니다'
+           + ' - 창을 ' + need + 'px 이상으로 넓히고 다시 하세요';
+      }
+    } catch (e) {}
+    return n;
+  }
   var lastClickAt = 0;
 
   /* 앞 단계의 결과가 화면에 반영되기 전에 다음 단계를 누르면 클릭이 그냥 무시된다.
@@ -497,14 +542,15 @@
       : (P && P.shownDate && P.shownDate()) || U.searchedDate();
     if (seen === want) {                       // 이미 맞다 - 할 일이 없다
       S.fixDate = ''; S.fixSince = 0; S.fixPhase = 0;
-      S.fixClickAt = 0; S.fixSearchAt = 0; save();
+      S.fixClickAt = 0; S.fixSearchAt = 0;
+      S.fixOpenAt = 0; S.fixOpens = 0; save();
       log('조회 날짜가 ' + want + ' 로 맞춰졌습니다  [' + secs(elapsed()) + ']');
       return true;
     }
     if (now - S.fixSince > S.openWaitMaxMs) {
       finish('조회 화면을 ' + want + ' 로 바꾸지 못했습니다 ('
-             + (S.fixPhase === 0 ? '달력을 열지 못함'
-                : S.fixPhase === 1 ? '그 날짜 칸을 누르지 못함'
+             + (S.fixPhase < 2
+                ? '달력에서 그 날짜를 누르지 못함 (달력 열기 ' + (S.fixOpens || 0) + '회 시도)'
                 : S.fixSearchAt === -1 ? '날짜는 바꿨는데 조회 버튼을 못 찾음'
                 : '날짜와 조회를 눌렀는데 목록이 안 바뀜')
              + ') - 화면을 확인하세요', true);
@@ -512,21 +558,28 @@
     }
     if (now - lastClickAt < S.gapMs) return false;
 
-    if (S.fixPhase === 0) {                    // 달력 열기
-      var input = U.dateInputEl();
-      if (!input) return false;
-      var probe0 = U.findPickerDate(want);
-      if (probe0 && probe0.el) { S.fixPhase = 1; save(); return false; }  // 이미 열려 있다
-      U.fireClick(input);
-      lastClickAt = now;
-      S.fixPhase = 1; save();
-      log('조회 날짜를 바꾸려고 달력을 엽니다 (목표 ' + want + ')');
-      return false;
-    }
-
-    if (S.fixPhase === 1) {                    // 목표 날짜 누르기
+    if (S.fixPhase < 2) {
       var r = U.findPickerDate(want);
-      if (!r || !r.el) return false;           // 아직 안 그려졌다 - 기다린다
+      if (!r || !r.el) {
+        /* 달력이 아직 안 열렸다. 한 번만 누르고 기다리면 영원히 안 열릴 수 있다:
+         * 새로고침 직후에는 페이지 스크립트가 클릭 핸들러를 아직 안 붙여서 첫 클릭이
+         * 예외도 없이 그냥 사라진다. 실측(2026-08-28)에서 ▶ 재생 은 되는데
+         * ▶ 대기 시작 은 "달력을 엽니다" 에서 멈춘 것이 정확히 이 경우였다
+         * (재생은 이미 안정된 화면에서, 대기 시작은 새로고침 직후에 누른다).
+         * 열릴 때까지 간격을 두고 다시 누른다. */
+        var input = U.dateInputEl();
+        if (!input) return false;
+        if (S.fixOpenAt && now - S.fixOpenAt < S.retryClickMs) return false;
+        U.fireClick(input);
+        lastClickAt = now;
+        S.fixOpenAt = now;
+        S.fixOpens = (S.fixOpens || 0) + 1;
+        S.fixPhase = 1;
+        save();
+        log('조회 날짜를 바꾸려고 달력을 엽니다 (목표 ' + want + ')'
+            + (S.fixOpens > 1 ? ' - ' + S.fixOpens + '회째' : ''));
+        return false;
+      }
       if (!r.available) {
         /* 09:00 직전이면 아직 예약 가능 창 밖이다. 곧 열리므로 기다린다. */
         return false;
@@ -630,7 +683,7 @@
      * 넘어감" 이었는데, 09:00 경쟁에서 의미 없이 2.5초를 버리는 짓이다.
      * 앞에서 무엇을 눌렀는지는 이미 알고 있으니 기다릴 이유가 없다. */
     if (step.onlyIfPrev && lastLabel.indexOf(step.onlyIfPrev) === -1) {
-      S.idx++; retries = 0; waitingSince = 0; save();
+      S.idx++; retries = 0; stopWaiting(); save();
       log('재생 ' + S.idx + '/' + S.steps.length + ': 해당 없어 건너뜀 ('
           + step.onlyIfPrev + ' 을 안 골랐음)');
       return;
@@ -647,7 +700,7 @@
      * 않는다. 이미 맞아서 아무것도 안 바꿨으면 되돌아갈 이유가 없다. */
       var doneEnsure = function (how, changed) {
         ensurePhase = 0;
-        retries = 0; waitingSince = 0; lastClickAt = now;
+        retries = 0; stopWaiting(); lastClickAt = now;
         if (changed && typeof step.restartFrom === 'number') {
           S.idx = step.restartFrom;
           save();
@@ -675,7 +728,7 @@
           doneEnsure(step.ensure + ' 로 맞춤 (select)', true);
           return;
         }
-        if (now - waitingSince > S.stepTimeoutMs) {
+        if (tooLong(S.stepTimeoutMs)) {
           finish('목록에 ' + step.ensure + ' 가 없습니다 - 직접 선택하세요', true);
         }
         return;
@@ -688,16 +741,16 @@
           return;
         }
         if (!ctrl) {
-          if (!waitingSince) waitingSince = now;
+          beganWaiting(now);
           /* optional: 이 화면에 아예 없을 수 있는 단계 (네이버페이로 결제하면
            * 카드 종류 드롭다운이 나타나지 않는다). 잠깐 기다려보고 없으면 넘어간다. */
-          if (step.optional && now - waitingSince > (S.optionalMs || 400)) {
-            S.idx++; retries = 0; waitingSince = 0; save();
+          if (step.optional && waitedMs > (S.optionalMs || 400)) {
+            S.idx++; retries = 0; stopWaiting(); save();
             log('재생 ' + S.idx + '/' + S.steps.length + ': 이 화면에 없어 건너뜀 - '
                 + (step.text || step.sel).slice(0, 20));
             return;
           }
-          if (now - waitingSince > S.stepTimeoutMs) {
+          if (tooLong(S.stepTimeoutMs)) {
             finish('단계 ' + (S.idx + 1) + ' 컨트롤을 못 찾음: ' + (step.text || step.sel), true);
           }
           return;
@@ -706,7 +759,7 @@
         lastClickAt = now;
         U.fireClick(ctrl);
         ensurePhase = 1;
-        waitingSince = now;
+        stopWaiting(); beganWaiting(now);
         log(step.ensure + ' 로 바꾸기 위해 목록을 엽니다');
         return;
       }
@@ -716,7 +769,7 @@
         var opt = (step.optionSel ? U.findEl(step.optionSel, '', { selectorOnly: true }) : null)
                   || U.findContaining(step.ensure, ctrl);
         if (!opt) {
-          if (now - waitingSince > S.stepTimeoutMs) {
+          if (tooLong(S.stepTimeoutMs)) {
             finish('목록에서 ' + step.ensure + ' 를 못 찾았습니다 - 직접 선택하세요', true);
           }
           return;
@@ -732,7 +785,7 @@
       var ap = (step.applySel ? U.findEl(step.applySel, '', { selectorOnly: true }) : null)
                || U.findContaining(step.applyText || '적용');
       if (!ap) {
-        if (now - waitingSince > S.stepTimeoutMs) {
+        if (tooLong(S.stepTimeoutMs)) {
           finish('[적용] 을 못 찾았습니다 - 직접 눌러주세요', true);
         }
         return;
@@ -842,11 +895,11 @@
     }
     if (!el) {
       phase(blockedEl ? '가림' : '요소 없음', now);
-      if (!waitingSince) waitingSince = now;
+      beganWaiting(now);
       /* optional: 이 화면에 아예 없을 수 있는 단계. 기다려보고 없으면 조용히 넘어간다. */
-      if (step.optional && !blockedEl && now - waitingSince > (S.optionalMs || 400)) {
+      if (step.optional && !blockedEl && waitedMs > (S.optionalMs || 400)) {
         markStep(S.idx + 1, step.text || step.sel);
-        S.idx++; retries = 0; waitingSince = 0; save();
+        S.idx++; retries = 0; stopWaiting(); save();
         log('재생 ' + S.idx + '/' + S.steps.length + ': 이 화면에 없어 건너뜀 - '
             + (step.text || step.sel).slice(0, 20) + '  [' + secs(elapsed()) + ']');
         return;
@@ -862,7 +915,7 @@
        * 달력에서 목표 날짜를 기다릴 때와 똑같이 다시 불러와서 본다.
        *
        * 단계 번호는 그대로 둔다 - 새로고침 뒤 이 단계부터 다시 본다. */
-      if (step.dynamicCabin && U.onDeparture() && now - waitingSince > S.retryClickMs) {
+      if (step.dynamicCabin && U.onDeparture() && waitedMs > S.retryClickMs) {
         if (!S.openWaitSince) S.openWaitSince = now;
         if (now - S.openWaitSince > S.openWaitMaxMs) {
           finish('"' + S.cabin + '" 좌석이 ' + Math.round(S.openWaitMaxMs / 1000)
@@ -878,8 +931,8 @@
         return;
       }
 
-      if (now - waitingSince > S.retryClickMs && retryPrevClick(now)) return;
-      if (now - waitingSince > S.stepTimeoutMs) {
+      if (waitedMs > S.retryClickMs && retryPrevClick(now)) return;
+      if (tooLong(S.stepTimeoutMs)) {
         // 스크린샷 한 장으로 원인 파악이 되도록 패널 상태줄에 진단 요약을 그대로 붙인다.
         var diag = blockedEl
           ? '무언가에 가려 누를 수 없습니다 (모달이 떠 있는지 확인하세요): '
@@ -889,7 +942,8 @@
           : step.dynamicCabin
             ? '"' + S.cabin + '" 좌석이 이 화면에 없습니다 (그날 그 등급이 안 열렸을 수 있음)'
             : U.diagnoseText(step.sel, step.selectorOnly ? '' : step.text);
-        pause('단계 ' + (S.idx + 1) + ' 요소를 못 찾음: ' + (step.text || step.sel || '').slice(0, 30) + ' [' + diag + ']');
+        pause('단계 ' + (S.idx + 1) + ' 요소를 못 찾음: ' + (step.text || step.sel || '').slice(0, 30)
+              + ' [' + diag + ']' + hiddenNote());
       }
       return;
     }
@@ -951,8 +1005,28 @@
     }
   }
 
+  /* 이 크롬이 가려진 창을 늦추는가를 직접 잰다.
+   *
+   * "최소화하면 안 됩니다" 는 말로만 하면 믿기 어렵고, 사람마다 크롬 설정도 다르다.
+   * 60ms 주기가 가려져 있는 동안 얼마나 벌어지는지 재서 사실을 보여준다.
+   * 늦추지 않는 크롬(아래 플래그로 띄운 경우)이면 60ms 그대로 유지된다:
+   *   --disable-background-timer-throttling
+   *   --disable-backgrounding-occluded-windows
+   *   --disable-renderer-backgrounding
+   * Playwright 가 테스트할 때 쓰는 것도 이 플래그들이라, 테스트에서는 이 문제가
+   * 아예 나타나지 않는다. 실제 크롬과 다른 지점이므로 사람 눈으로 확인해야 한다. */
+  var throttle = { hiddenGapMs: 0, samples: 0, lastAt: 0 };
+  function measureThrottle(now) {
+    var d = throttle.lastAt ? now - throttle.lastAt : 0;
+    throttle.lastAt = now;
+    if (!document.hidden) return;
+    if (d <= 0) return;
+    throttle.samples++;
+    if (d > throttle.hiddenGapMs) throttle.hiddenGapMs = d;
+  }
+
   // 페이지가 바뀌어도 localStorage 의 idx 에서 이어서 재생된다
-  setInterval(tick, 60);
+  setInterval(function () { measureThrottle(Date.now()); tick(); }, 60);
   new MutationObserver(tick).observe(document, { childList: true, subtree: true });
 
   /** ke_award/steps.json 에 그대로 붙여넣을 수 있는 형태로 뽑는다. */
@@ -1051,6 +1125,8 @@
       log('내장 단계 ' + S.steps.length + '개를 불러왔습니다');
     },
     bakedCount: function () { return baked().length; },
+    /* 가려진 동안 tick 간격이 얼마나 벌어졌나. 60ms 근처면 이 크롬은 안 늦춘다. */
+    throttle: function () { return { gapMs: throttle.hiddenGapMs, samples: throttle.samples }; },
     list: function () { console.table(S.steps); return S.steps; },
     onChange: function (fn) { listeners.push(fn); }
   };

@@ -298,10 +298,19 @@
      * 달력 경로로 간다 - 오늘 실측만큼 걸릴 뿐, 놓치지는 않는다. */
     var plan = startPlan(R);
     if (!R.armForReload(plan.from, plan.fix)) return false;
-    // 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
+    /* 이후 흐름은 recorder 가 몬다. HUD 는 무장을 풀어 카운트다운을 멈춘다.
+     *
+     * 소리는 끄지 않는다. 예전에는 여기서 껐는데, 경쟁이 벌어지는 것은 발사 '뒤' 다.
+     * 다만 이 문서가 새로고침되면 AudioContext 도 같이 죽고, 새 문서에서는 사용자
+     * 조작 없이 다시 소리를 낼 수 없다(크롬 자동재생 정책). 그래서 재생 구간은
+     * 결국 창을 최소화하면 느려진다 - 그 사실을 숨기지 말고 알린다. */
     S.armed = false;
-    keepAwake(false);
     save();
+    if (document.hidden) {
+      /* 새로고침 뒤에는 소리를 다시 낼 수 없어 재생이 느려진다. 막을 수는 없어도
+       * 왜 느린지는 알려야 한다 - 소리로도 부른다. */
+      notify('창이 가려져 있습니다 - 재생이 느려집니다. 이 창을 보이게 두세요', false);
+    }
     if (plan.inPlace) {
       /* 같은 주소로 새로고침한다. 페이지 한 장(달력)과 그에 딸린 전환이 통째로 빠진다. */
       toast('발사 (' + reason + ') - 조회 화면에서 그대로 새로고침 @ ' + fmtKst(nowSrv()));
@@ -359,6 +368,12 @@
         keepOsc = null;
       }
     } catch (e) { keepOsc = null; }
+  }
+
+  /* 재생이 끝났으면 더 이상 소리를 낼 이유가 없다. */
+  function stopAwakeWhenIdle() {
+    var R4 = REC();
+    if (keepOsc && !S.armed && !(R4 && R4.state.playing)) keepAwake(false);
   }
 
   function notify(msg, ok) {
@@ -423,11 +438,23 @@
       cdEl.textContent = '발사 시각 미설정';
     }
 
-    /* 백그라운드 탭은 타이머가 느려진다. 무장 중이면 눈에 띄게 알린다. */
-    if (S.armed && document.hidden) {
-      setStatus(keepOsc
-        ? '탭이 백그라운드지만 소리로 스로틀링을 막는 중 - 그래도 앞에 두는 게 가장 확실합니다'
-        : '⚠ 탭이 백그라운드입니다 - 타이머가 늦어질 수 있으니 이 탭을 앞에 두세요');
+    /* 크롬은 안 보이는 탭의 타이머를 늦춘다. 5분이 지나면 1분에 한 번까지 떨어진다
+     * (intensive throttling). 소리를 내는 동안은 예외지만, 새로고침하면 그 소리가
+     * 끊기고 새 문서에서는 사용자 조작 없이 다시 낼 수 없다.
+     *
+     * 그래서 '무장 중' 과 '재생 중' 의 사정이 다르다:
+     *   무장 중  - 대기 시작을 누른 그 문서 그대로다. 소리가 살아 있어 정시에 쏜다
+     *   재생 중  - 새로고침 뒤라 소리가 없다. 창을 최소화하면 사실상 멈춘다
+     * 실측(2026-08-28): 최소화하면 멈췄다가 그 창으로 돌아가야 다시 움직였다. */
+    var R3 = REC();
+    var busy = R3 && R3.state.playing;
+    stopAwakeWhenIdle();
+    if ((S.armed || busy) && document.hidden) {
+      setStatus(busy
+        ? '⚠ 창이 가려져 있어 재생이 멈춰 있습니다 - 이 창을 보이게 두세요 (최소화 금지)'
+        : keepOsc
+          ? '탭이 백그라운드지만 소리로 스로틀링을 막는 중 - 그래도 앞에 두는 게 가장 확실합니다'
+          : '⚠ 탭이 백그라운드입니다 - 타이머가 늦어질 수 있으니 이 탭을 앞에 두세요');
     }
   }
 
@@ -499,6 +526,36 @@
     /* '바로 시작' 이 되는지는 목표 날짜와 저장된 주소에 달렸는데, 둘 다 recorder 쪽
      * 상태다. 여기서 같이 갱신하지 않으면 목표 날짜를 고쳐도 안내가 옛날 것으로
      * 남아, 안 되는 줄 알고 있다가 정작 되거나 그 반대가 된다. */
+    /* 창이 좁으면 사이트가 모바일 화면으로 바뀐다. 그러면 녹화해둔 셀렉터와 라벨이
+     * 통째로 달라져서, 멀쩡히 보이는 버튼을 두고 "요소를 못 찾음" 으로 멈춘다.
+     * 09:00 에 그걸 알면 늦으니 미리 크게 알린다. */
+    var wEl = root.querySelector('#ke-width');
+    if (wEl) {
+      var w = window.innerWidth || 0;
+      var need = (R && R.state.recordedWidth) || 1200;
+      wEl.textContent = (w && w < need * 0.85)
+        ? '⚠ 창이 좁습니다 (' + w + 'px) - 모바일 화면으로 바뀌면 단계를 못 찾습니다.'
+          + ' 창을 ' + need + 'px 이상으로 넓히세요'
+        : '';
+    }
+
+    /* 이 크롬이 가려진 창을 늦추는지 직접 재서 보여준다. 말로만 "최소화하지 마세요"
+     * 라고 하면 확인할 방법이 없다. */
+    var tEl = root.querySelector('#ke-throttle');
+    if (tEl && R && R.throttle) {
+      var th = R.throttle();
+      if (!th.samples) {
+        tEl.textContent = '';
+      } else if (th.gapMs > 400) {
+        tEl.style.color = '#c00';
+        tEl.textContent = '⚠ 이 크롬은 가려진 창을 늦춥니다 (재보니 ' + th.gapMs
+                        + 'ms 까지 벌어짐) - 창을 보이게 두거나 스로틀링 끈 크롬을 쓰세요';
+      } else {
+        tEl.style.color = '#2a7';
+        tEl.textContent = '✔ 가려져도 안 늦는 크롬입니다 (최대 ' + th.gapMs + 'ms)';
+      }
+    }
+
     var pr = root.querySelector('#ke-probe');
     var P = W.KE_PROBE || window.KE_PROBE;
     if (pr && P) {
@@ -616,6 +673,8 @@
       '<option value="departure">조회 화면 (실험 중) - 달력 한 장을 건너뜀</option>' +
       '</select>' +
       '<div id="ke-skipcal-why" style="margin:2px 0 0 2px"></div>' +
+      '<div id="ke-width" style="color:#c00;margin:2px 0 0 2px"></div>' +
+      '<div id="ke-throttle" style="margin:2px 0 0 2px"></div>' +
       '<div style="display:flex;align-items:center;gap:6px;margin-top:4px">' +
       '<span id="ke-probe" style="color:#888;flex:1"></span>' +
       '<button id="ke-probe-dump" style="padding:2px 6px;font-size:11px">조회 응답</button></div>' +
