@@ -91,6 +91,28 @@ def main() -> int:
                   "페이지 탓으로 잘못 적지 않는다", str(two))
             print(f"      {two['n']}단계 {two['ms']}ms ({two['why']})")
 
+            # ---- 시계는 끝나면 멈춰야 한다 ----
+            # 실측(2026-08-28): 33초에 끝난 실행이 한 시간 뒤 6346초로 보였다.
+            # 계속 올라가는 숫자는 "이번에 몇 초 걸렸나" 를 못 알려준다.
+            times = run(pg, "?late=600")
+            t1 = pg.evaluate("() => KE_REC.elapsed()")
+            pg.wait_for_timeout(1500)
+            t2 = pg.evaluate("() => KE_REC.elapsed()")
+            check(abs(t2 - t1) < 0.05,
+                  f"재생이 끝나면 소요시간이 멈춘다 (1.5초 뒤에도 {t1:.2f}s -> {t2:.2f}s)")
+            check(t2 > 0.4, f"그래도 실제로 걸린 시간은 남아 있다 ({t2:.2f}s)")
+
+            # 카운트다운도 끝난 뒤엔 숫자를 올리지 않는다
+            pg.evaluate("""() => {
+              KE_HUD.state.targetKst = '2020-01-01 09:00:00';
+              KE_HUD.state.armed = false; KE_HUD.save();
+            }""")
+            pg.wait_for_timeout(300)
+            cd = pg.evaluate("document.getElementById('ke-cd')?.textContent || ''")
+            check("T+" not in cd,
+                  "대기 중이 아니면 T+ 를 올리지 않는다", cd)
+            print(f"      카운트다운: {cd!r}")
+
             # ---- 3) 빠른 단계에는 군더더기를 붙이지 않는다 ----
             times = run(pg, "?late=1")
             one = next((t for t in times if t["n"] == 1), None)

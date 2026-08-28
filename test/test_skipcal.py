@@ -251,44 +251,27 @@ def main() -> int:
             print(f"      {msg}")
             pg.evaluate("() => { KE_REC.state.openWaitMaxMs = 180000; KE_REC.save(); }")
 
-            # ---------- 날짜 달력에서 목표 날짜 칸 찾기 ----------
-            # 실측 구조: #month202708 안의 td, 라벨 "18 18일, 수요일".
-            # nth-of-type 경로로 세지 않고 연월 id + 일자로 집는다 - 화면이 조금
-            # 바뀌어도 버티는 유일한 방법이다.
-            land(DEP + "?depDate=20270821&openTo=21", fresh_loads=True)
-            pg.click("#depdate")
-            pg.wait_for_timeout(200)
+            # ---------- 날짜 띠에서 목표 날짜 찾기 ----------
+            # 실측(2026-08-28): #flexible-date > li > button.flexible-date__link,
+            # 라벨 "출발일 21 (토) 선택 가능". 라벨에 월이 없어 일자만 맞춰 본다.
+            # 위쪽 위젯(날짜칸 → 달력 → [항공편 검색])은 복불복이라 버렸다 -
+            # 달력 페이지로 되돌아갈 때가 있는데 그게 건너뛰려던 그 페이지다.
+            land(DEP + "?depDate=20270818&openTo=21", fresh_loads=True)
 
-            got = pg.evaluate("() => { var r = KE_UTIL.findPickerDate('08-18', 2027);"
-                              " return r && {found: !!r.el, av: r.available,"
-                              " txt: r.el && r.el.textContent}; }")
-            check(got and got["found"] and got["av"] is True,
-                  "열려 있는 날짜 칸을 집는다", str(got))
-            check(got and "18일" in (got["txt"] or ""), "제 날짜 칸을 집는다", str(got))
+            got = pg.evaluate("() => { var r = KE_UTIL.findStripDate('08-21');"
+                              " return r && {found: !!r.el, sel: r.selectable, lab: r.label}; }")
+            check(got and got["found"] and got["sel"] is True,
+                  "열려 있는 날짜를 띠에서 집는다", str(got))
 
-            # 아직 안 열린 날짜는 -available 이 없다. 이게 "그날이 열렸는가" 의 신호다.
-            got = pg.evaluate("() => { var r = KE_UTIL.findPickerDate('08-22', 2027);"
-                              " return r && {found: !!r.el, av: r.available, why: r.why}; }")
-            check(got and got["found"] and got["av"] is False,
-                  "아직 안 열린 날짜는 고를 수 없다고 판정한다", str(got))
-            check(got and "예약 가능 창 밖" in (got["why"] or ""),
-                  "왜 못 고르는지 말한다", str(got))
+            got = pg.evaluate("() => { var r = KE_UTIL.findStripDate('08-22');"
+                              " return r && {found: !!r.el, sel: r.selectable, why: r.why}; }")
+            check(got and got["found"] and got["sel"] is False
+                  and "운항편 없음" in (got["why"] or ""),
+                  "아직 안 열린 날짜는 화면 문구 그대로 못 고른다고 한다", str(got))
 
-            # 09:00 에 하루가 늘어나면 같은 칸이 열린다
-            land(DEP + "?depDate=20270821&openTo=22", fresh_loads=True)
-            pg.click("#depdate")
-            pg.wait_for_timeout(200)
-            got = pg.evaluate("() => { var r = KE_UTIL.findPickerDate('08-22', 2027);"
-                              " return r && r.available; }")
-            check(got is True, "창이 늘어나면 그 날짜가 열린 것으로 판정한다", str(got))
-
-            # 그 달 달력이 아예 없으면 없다고 한다 (엉뚱한 칸을 집지 않는다)
-            got = pg.evaluate("() => KE_UTIL.findPickerDate('12-25', 2027)")
-            check(got and not got["el"] and "달력이 화면에 없습니다" in got["why"],
-                  "다른 달은 엉뚱하게 집지 않는다", str(got))
-
-            check(pg.evaluate("() => !!KE_UTIL.dateInputEl()"),
-                  "'가는 날' 입력칸을 찾는다 (눌러야 달력이 열린다)")
+            got = pg.evaluate("() => KE_UTIL.findStripDate('12-25')")
+            check(got and not got["el"] and "다른 달" in (got["why"] or ""),
+                  "다른 달의 같은 일자를 집지 않는다 (띠 라벨에는 월이 없다)", str(got))
 
             # ---------- 09:00 상황: 새 날짜를 화면 달력에서 골라 맞춘다 ----------
             # 새로 열리는 날짜는 09:00 에야 예약 가능 창에 들어오므로 미리 맞춰둘 수
@@ -334,45 +317,43 @@ def main() -> int:
             print(f"      {msg}")
             pg.evaluate("() => { KE_REC.state.openWaitMaxMs = 180000; KE_REC.save(); }")
 
-            # ---------- id 가 바뀌어도 라벨로 찾는다 ----------
-            # 실측 라벨은 "항공편 검색" 이다. 예전에 "항공편 조회" 로 넣어뒀다가
-            # 못 찾았다. id 를 먼저 보되 라벨은 보험으로 남긴다.
-            land(DEP + "?depDate=20270821&openTo=22", fresh_loads=True)
-            pg.evaluate("() => { document.getElementById('flight-widget__btn').id = 'renamed'; }")
-            setup("08-22")
-            pg.evaluate("() => KE_HUD.fire('id 바뀐 경우')")
-            pg.wait_for_function("() => (window.__clicks||[]).includes('next')", timeout=30000)
-            check("depDate=20270822" in pg.url,
-                  "id 가 바뀌어도 '항공편 검색' 라벨로 찾아 누른다", pg.url)
-
-            # ---------- 새로고침 직후 첫 클릭이 먹혀도 결국 연다 ----------
+            # ---------- 새로고침 직후 첫 클릭이 먹혀도 결국 누른다 ----------
             # ▶ 재생 은 이미 안정된 화면에서 누르지만 ▶ 대기 시작 은 새로고침 직후에
-            # 누른다. 그때는 페이지 스크립트가 아직 클릭 핸들러를 안 붙여서 첫 클릭이
-            # 그냥 사라진다. 한 번만 누르고 기다리면 영원히 안 열린다 - 실측에서
-            # "달력을 엽니다" 에서 멈춘 것이 정확히 이 경우였다.
-            land(DEP + "?depDate=20270821&openTo=22&deaf=2500", fresh_loads=True)
-            setup("08-22")
+            # 누른다. 그때는 페이지가 아직 클릭 핸들러를 안 붙여서 첫 클릭이 사라진다.
+            # 한 번만 누르고 기다리면 영원히 안 넘어간다 - 실측에서 그랬다.
+            land(DEP + "?depDate=20270818&openTo=21&deaf=2500", fresh_loads=True)
+            setup("08-21")
             pg.evaluate("() => KE_HUD.fire('첫 클릭이 먹히는 경우')")
             pg.wait_for_function("() => (window.__clicks||[]).includes('next')", timeout=30000)
-            check("depDate=20270822" in pg.url,
+            check("depDate=20270821" in pg.url,
                   "첫 클릭이 먹혀도 다시 눌러서 결국 바꾼다", pg.url)
 
-            # ---------- 조회 버튼을 못 찾으면 그렇다고 말한다 ----------
-            # 날짜만 바꾸고 목록이 그대로인 채 좌석을 누르면 엉뚱한 날 예매가 된다.
-            # 무엇이 없어서 못 했는지 정확히 말해야 다음에 그것만 고칠 수 있다.
-            land(DEP + "?depDate=20270821&openTo=22&nosearch=1", fresh_loads=True)
-            setup("08-22")
-            pg.evaluate("() => { KE_REC.state.openWaitMaxMs = 4000; KE_REC.save(); }")
-            pg.evaluate("() => KE_HUD.fire('조회 버튼 없음')")
-            pg.wait_for_function("() => window.KE_REC && !window.KE_REC.state.playing"
-                                 " && window.KE_REC.state.problem", timeout=40000)
-            msg = pg.evaluate("KE_REC.state.message")
-            check("조회 버튼을 못 찾음" in (msg or ""),
-                  "무엇이 없어서 못 했는지 정확히 말한다", msg)
-            check("seat" not in (pg.evaluate("window.__clicks") or []),
-                  "그 상태로 좌석을 누르지 않는다", str(pg.evaluate("window.__clicks")))
-            print(f"      {msg}")
-            pg.evaluate("() => { KE_REC.state.openWaitMaxMs = 180000; KE_REC.save(); }")
+            # ---------- 재생 / 연습 / 대기 시작이 똑같이 동작해야 한다 ----------
+            # 셋은 시작하는 방식이 다르다(그 자리에서 / 10초 뒤 / 정시). 하지만
+            # "무엇을 누르는가" 는 같아야 한다. 실측에서 ▶ 재생 만 되고 ▶ 대기 시작 은
+            # 안 되는 일이 있었고, 그건 코드가 두 갈래였기 때문이다.
+            def run_via(how: str) -> list:
+                land(DEP + "?depDate=20270818&openTo=21", fresh_loads=True)
+                setup("08-21")
+                if how == "play":
+                    pg.click("#ke-play")
+                elif how == "rehearse":
+                    pg.evaluate("() => KE_HUD.rehearse(1)")
+                else:
+                    pg.evaluate("() => KE_HUD.fire('대기 시작')")
+                pg.wait_for_function("() => (window.__clicks||[]).includes('next')",
+                                     timeout=30000)
+                return [pg.url, pg.evaluate("window.__clicks || []")]
+
+            base = run_via("play")
+            for how, name in (("rehearse", "연습"), ("arm", "대기 시작")):
+                got = run_via(how)
+                check(got[0].split("?")[1].split("&")[0] == base[0].split("?")[1].split("&")[0]
+                      and got[1] == base[1],
+                      f"{name} 이 ▶ 재생 과 같은 결과를 낸다",
+                      f"재생={base} / {name}={got}")
+            check("depDate=20270821" in base[0], "셋 다 목표 날짜로 바꿔서 진행한다", base[0])
+            print(f"      셋 다: {base[1]} @ {base[0].split('?')[1]}")
 
             # ---------- 꺼두면 원래대로 ----------
             land(DEP)

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.26.0
+// @version      1.27.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -349,6 +349,42 @@ try {
    * 이틀 앞선 날짜를 골랐다(실측: 22일이어야 하는데 20일이 선택됨).
    * 등급 마커와 무관하게 "날짜 숫자가 있는 마지막 셀" 을 고른다. 엉뚱한 날 예매는
    * 목표 날짜 검사가 막는다 - 그게 훨씬 확실한 방어선이다. */
+  /* 목표 날짜를 정했으면 그 날짜 칸을 직접 찾는다.
+   *
+   * 예전에는 목표 날짜가 있어도 "가장 나중 날짜" 만 찾아놓고 목표와 다르면 새로고침을
+   * 반복했다. 목표가 최신일과 같을 때만 되는 구조라, 그렇지 않으면 영원히 돌았다
+   * (실측 2026-08-28: 목표 08-18, 감지 08-22 로 무한 새로고침).
+   *
+   * 09:00 에는 목표 날짜가 아직 안 열려 있는 게 정상이다 - 그때만 못 찾고,
+   * 그 경우에만 새로고침해서 다시 본다. */
+  function findOpenDate(idPrefix, want) {
+    if (!want) return findLatestOpenDate(idPrefix);
+    var md = monthDay(want);
+    if (!md) return null;
+    var list = openDateCells(idPrefix);
+    for (var i = 0; i < list.length; i++) {
+      if (sameDate(md, label(list[i])) === true) return list[i];
+    }
+    return null;
+  }
+
+  /* 지금 고를 수 있는 날짜 칸들 (문서 순서). */
+  function openDateCells(idPrefix) {
+    idPrefix = idPrefix || 'dep-fare-';
+    var list, out = [];
+    try { list = document.querySelectorAll('[id^="' + idPrefix + '"]'); } catch (e) { return out; }
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (!visible(el)) continue;
+      if (el.getAttribute('aria-disabled') === 'true' || el.disabled) continue;
+      var cls = typeof el.className === 'string' ? el.className : '';
+      if (/disable|unavail|soldout/i.test(cls)) continue;
+      if (!/\d/.test(label(el))) continue;    // 달력 여백 칸(빈 셀) 제외
+      out.push(el);
+    }
+    return out;
+  }
+
   function findLatestOpenDate(idPrefix) {
     idPrefix = idPrefix || 'dep-fare-';
     var list;
@@ -463,6 +499,61 @@ try {
     return { el: null, available: false, why: md + ' 칸을 그 달 달력에서 찾지 못했습니다' };
   }
 
+  /* 조회 결과 가운데의 날짜 띠. 이걸 눌러야 그 자리에서 다시 조회된다.
+   *
+   * 실측(2026-08-28):
+   *   #flexible-date > li.flexible-date__item > button.flexible-date__link.-active
+   *   라벨 "출발일 21 (토) 선택 가능"
+   *
+   * 위쪽 검색 위젯의 날짜칸을 고치고 [항공편 검색] 을 누르는 길도 있는데, 그건
+   * 달력 페이지로 되돌아간다. 건너뛰려던 바로 그 페이지다. 여기 띠를 눌러야 한다.
+   *
+   * 라벨에 월이 없다("21 (토)"). 목표 날짜의 일자만 맞춰 보고, 진짜 그 날짜로
+   * 조회됐는지는 서버 응답으로 확인한다. */
+  var STRIP_SEL = '#flexible-date li, [class*="flexible-date__item"]';
+
+  function findStripDate(mmdd) {
+    var md = monthDay(mmdd);
+    if (!md) return null;
+    /* 띠 라벨에는 월이 없다("21 (토)"). 그래서 일자만 맞춰 보면 다른 달의 같은
+     * 일자를 집는다 - 12-25 를 찾다가 8월 25일을 누르는 식이다. 지금 화면이 몇 월을
+     * 보고 있는지는 검색 위젯의 날짜칸이 알려주므로, 달이 다르면 아예 없다고 한다. */
+    var now = searchedDate();
+    if (now && now.slice(0, 2) !== md.slice(0, 2)) {
+      return { el: null, selectable: false,
+               why: md + ' 은(는) 이 화면(' + now + ')의 날짜 띠에 없습니다 (다른 달)' };
+    }
+    /* 띠 라벨에는 월이 없다("21 (토)"). 그래서 일자만 맞춰 보면 다른 달의 같은
+     * 일자를 집는다 - 12-25 를 찾다가 8월 25일을 누르는 식이다. 지금 화면이 몇 월을
+     * 보고 있는지는 검색 위젯의 날짜칸이 알려주므로, 달이 다르면 아예 없다고 한다. */
+    var nowMd = searchedDate();
+    if (nowMd && nowMd.slice(0, 2) !== md.slice(0, 2)) {
+      return { el: null, selectable: false,
+               why: md + ' 은(는) 이 화면(' + nowMd + ')의 날짜 띠에 없습니다 (다른 달)' };
+    }
+    var want = +md.slice(3), items;
+    try { items = document.querySelectorAll(STRIP_SEL); } catch (e) { return null; }
+    if (!items.length) return { el: null, selectable: false, why: '날짜 띠가 화면에 없습니다' };
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (!visible(it)) continue;
+      var t = label(it);
+      /* "출발일 21 (토) 선택 가능" - 출발일 뒤 숫자가 그 날의 일자다. */
+      var m = t.match(/출발일\s*(\d{1,2})/) || t.match(/(\d{1,2})/);
+      if (!m || +m[1] !== want) continue;
+      var btn = it.querySelector('button, a') || it;
+      var no = /없음/.test(t);                       // 좌석 없음 / 운항편 없음
+      var ok = !no && (/선택\s*가능/.test(t) || hasCls(btn, '-active') || hasCls(it, '-active'));
+      return { el: btn, selectable: ok, label: t.slice(0, 40),
+               why: ok ? '' : (md + ' 은(는) 아직 고를 수 없습니다: ' + t.slice(0, 24)) };
+    }
+    return { el: null, selectable: false, why: md + ' 이(가) 날짜 띠에 없습니다' };
+  }
+
+  function hasCls(el, c) {
+    try { return !!(el && el.classList && el.classList.contains(c)); } catch (e) { return false; }
+  }
+
   /** 조회 화면의 '가는 날' 입력칸. 눌러야 달력이 열린다.
    *
    * 셀렉터가 겹겹이 걸린다: 바깥 감싸개(div.-dateinput)도, 안쪽 실제 칸
@@ -554,12 +645,14 @@ try {
   var U = {
     visible: visible, label: label, cssPath: cssPath, findEl: findEl, CLICKABLE: CLICKABLE,
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
-    findLatestOpenDate: findLatestOpenDate, inChrome: inChrome, realTarget: realTarget,
+    findLatestOpenDate: findLatestOpenDate, findOpenDate: findOpenDate,
+    openDateCells: openDateCells, inChrome: inChrome, realTarget: realTarget,
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
     onDeparture: onDeparture, searchedDate: searchedDate,
-    findPickerDate: findPickerDate, dateInputEl: dateInputEl, urlDates: urlDates, retarget: retarget,
+    findPickerDate: findPickerDate, dateInputEl: dateInputEl,
+    findStripDate: findStripDate, urlDates: urlDates, retarget: retarget,
     nextYearFor: nextYearFor,
     alreadyOn: alreadyOn
   };
@@ -577,7 +670,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.26.0', hash: 'a46b3fc' };
+  var B = { version: '1.27.0', hash: '1fc8b83' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -942,6 +1035,10 @@ try {
     playAfterReload: false, // 새로고침이 끝난 뒤에 재생을 시작하라는 예약 (armForReload)
     playFrom: 0,          // 그 재생을 몇 번째 단계부터 시작할지 (달력 건너뛰기)
     startedAt: 0,         // 발사 시각(ms). 단계별/총 소요시간 표시용
+    /* 끝난 시각. 이게 없으면 재생이 끝난 뒤에도 소요시간이 계속 올라가서, 33초에
+     * 끝난 실행이 한 시간 뒤에 6346초로 보인다(실측 2026-08-28). 멈춘 시계여야
+     * "이번에 몇 초 걸렸나" 를 나중에도 읽을 수 있다. */
+    endedAt: 0,
     /* 재생이 끝났지만 사람이 봐야 하는 상태인가.
      * 예전에는 skipped/skippedList 로 "건너뛴 단계"를 셌는데, 건너뛰기 기능을
      * 없애면서 아무도 값을 올리지 않는 죽은 장치가 됐다. 그런데 hud 의 완료 판정은
@@ -989,12 +1086,10 @@ try {
      * 미리 맞춰둘 수 없으므로(그 시각에야 예약 가능 창에 들어온다) 이 과정이 있어야
      * 조회 화면 모드가 09:00 경쟁에 쓸 수 있게 된다. */
     fixDate: '',          // 맞춰야 할 목표 날짜 (MM-DD)
-    fixPhase: 0,          // 0=달력 열기 1=날짜 누르기 2=서버 응답으로 확인
+    fixPhase: 0,          // 0=날짜 띠에서 누르기, 2=서버 응답으로 확인
     fixSince: 0,
     fixClickAt: 0,        // 날짜를 누른 시각. 이후에 온 응답만 근거로 삼는다
-    fixOpenAt: 0,         // 달력을 열려고 마지막으로 누른 시각
-    fixOpens: 0,          // 몇 번 눌러봤나 (멈출 때 이유에 쓴다)
-    fixSearchAt: 0,       // 조회 버튼을 누른 시각
+    fixOpens: 0,          // 날짜를 몇 번 눌러봤나 (멈출 때 이유에 쓴다)
     source: 'baked',      // 지금 단계가 어디서 왔는지: 'baked'(steps.json) | 'local'(직접 녹화)
     /* 녹화할 때의 창 너비. 대한항공 화면은 반응형이라 창이 좁아지면 모바일
      * 레이아웃으로 바뀌고, 그러면 셀렉터도 라벨도 달라진다 - 위험품 안내 모달은
@@ -1322,23 +1417,43 @@ try {
 
   /** 발사(재생 시작)부터 지금까지 몇 초. 새로고침을 건너도 이어지도록 저장해둔다. */
   function elapsed() {
-    return S.startedAt ? (Date.now() - S.startedAt) / 1000 : 0;
+    if (!S.startedAt) return 0;
+    /* 재생이 끝났으면 그때 시각으로 고정한다 - 계속 올라가는 숫자는 아무것도
+     * 알려주지 않는다. */
+    var end = (!S.playing && S.endedAt) ? S.endedAt : Date.now();
+    return (end - S.startedAt) / 1000;
   }
   function secs(v) { return v.toFixed(2) + 's'; }
+
+  /* 한 번의 실행을 시작할 때 지워야 하는 것들.
+   *
+   * play() 와 armForReload() 가 각자 조금씩 다르게 지우다가 같은 사고가 세 번 났다:
+   * ▶ 재생 은 되는데 ▶ 대기 시작 만 안 되는 것이다. 마지막이 openWaitSince 였는데,
+   * 지난 실행의 값이 남아 시작하자마자 "180초 동안 안 열렸습니다" 로 끝났다
+   * (실제로는 0.64초. 실측 2026-08-28).
+   *
+   * 지우는 곳을 하나로 둔다. 새 상태를 추가할 때도 여기만 고치면 둘이 같이 간다. */
+  function resetRunState() {
+    S.openWaitSince = 0;
+    S.endedAt = 0;
+    S.problem = false;
+    S.fixSince = 0; S.fixPhase = 0; S.fixClickAt = 0; S.fixOpens = 0;
+    S.times = [];
+    S.stepStartedAt = Date.now();
+    scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
+    lastLabel = '';
+    ensurePhase = 0;
+    retries = 0;
+    lastOpenReloadAt = 0;
+    stopWaiting();
+  }
 
   function play() {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return; }
     S.recording = false;
     S.playing = true;
-    if (!S.startedAt || S.idx === 0) { S.startedAt = Date.now(); S.problem = false; }
-    scrollClicks = 0;   // 중간에 멈췄다 다시 재생할 때 스크롤 상태가 남으면 안 된다
-    lastLabel = '';
-    S.openWaitSince = 0;
-    S.fixSince = 0; S.fixPhase = 0;
-    S.times = []; S.stepStartedAt = Date.now();
-    ensurePhase = 0;
-    retries = 0;
-    waitingSince = 0;
+    if (!S.startedAt || S.idx === 0) S.startedAt = Date.now();
+    resetRunState();
     save();
     log('재생 시작 (' + (S.idx + 1) + '/' + S.steps.length + ')');
   }
@@ -1346,6 +1461,7 @@ try {
    * hud 의 알림 판정이 ★완료★ 대신 ⚠멈춤⚠ 을 내도록 한다. */
   function finish(why, problem) {
     S.problem = !!problem;
+    if (!S.endedAt) S.endedAt = Date.now();
     pause(why + timeReport());
   }
 
@@ -1362,17 +1478,14 @@ try {
    * 새로고침이 그 결과를 통째로 날린다 (정시 발사 때 날짜 선택이 사라지는 사고). */
   function armForReload(startIdx, fixDate) {
     if (!S.steps.length) { log('녹화된 단계가 없습니다'); return false; }
-    S.fixDate = fixDate || '';
-    S.fixPhase = 0;
-    S.fixSince = 0;
     S.recording = false;
     S.playing = false;
     S.idx = 0;
     S.playFrom = startIdx > 0 ? startIdx : 0;
     S.playAfterReload = true;
     S.startedAt = Date.now();   // 소요시간은 "발사 시점" 부터 센다 (새로고침 포함)
-    S.problem = false;
-    scrollClicks = 0;
+    resetRunState();            // play() 와 같은 것을 지운다 - 갈라지면 사고가 난다
+    S.fixDate = fixDate || '';
     save();
     log(S.playFrom ? ('페이지 이동 후 ' + (S.playFrom + 1) + '단계부터 재생 예약됨')
                    : '새로고침 후 처음부터 재생 예약됨');
@@ -1398,7 +1511,10 @@ try {
    *   마일리지는 매일 09:00 KST 에 하루치씩 새로 열려서, 녹화한 날짜는 다음날 못 쓴다.
    * dynamicCabin: 패널에서 고른 좌석 등급의 항공편 카드 (연습=일반석 / 실전=프레스티지). */
   function locate(step) {
-    if (step.dynamicDate) return U.findLatestOpenDate(step.idPrefix);
+    /* 목표 날짜를 정했으면 그 날짜를 찾는다. 안 정했으면 가장 나중 날짜(= 오늘
+     * 새로 열린 날). 예전에는 늘 최신일만 찾아서, 목표가 최신일이 아니면
+     * 영원히 새로고침만 했다. */
+    if (step.dynamicDate) return U.findOpenDate(step.idPrefix, S.expectDate);
     if (step.dynamicCabin) return U.findCabin(S.cabin);
     var el = U.findEl(step.sel, step.text, { selectorOnly: step.selectorOnly });
     if (el) return el;
@@ -1435,102 +1551,59 @@ try {
       : (P && P.shownDate && P.shownDate()) || U.searchedDate();
     if (seen === want) {                       // 이미 맞다 - 할 일이 없다
       S.fixDate = ''; S.fixSince = 0; S.fixPhase = 0;
-      S.fixClickAt = 0; S.fixSearchAt = 0;
-      S.fixOpenAt = 0; S.fixOpens = 0; save();
+      S.fixClickAt = 0;
+      S.fixOpens = 0; save();
       log('조회 날짜가 ' + want + ' 로 맞춰졌습니다  [' + secs(elapsed()) + ']');
       return true;
     }
     if (now - S.fixSince > S.openWaitMaxMs) {
       finish('조회 화면을 ' + want + ' 로 바꾸지 못했습니다 ('
-             + (S.fixPhase < 2
-                ? '달력에서 그 날짜를 누르지 못함 (달력 열기 ' + (S.fixOpens || 0) + '회 시도)'
-                : S.fixSearchAt === -1 ? '날짜는 바꿨는데 조회 버튼을 못 찾음'
-                : '날짜와 조회를 눌렀는데 목록이 안 바뀜')
+             + ((U.findStripDate(want) || {}).why
+                || (S.fixOpens ? S.fixOpens + '번 눌렀는데 조회 결과가 안 바뀜'
+                               : '날짜 띠에서 그 날을 누르지 못함'))
              + ') - 화면을 확인하세요', true);
       return false;
     }
     if (now - lastClickAt < S.gapMs) return false;
 
     if (S.fixPhase < 2) {
-      var r = U.findPickerDate(want);
-      if (!r || !r.el) {
-        /* 달력이 아직 안 열렸다. 한 번만 누르고 기다리면 영원히 안 열릴 수 있다:
-         * 새로고침 직후에는 페이지 스크립트가 클릭 핸들러를 아직 안 붙여서 첫 클릭이
-         * 예외도 없이 그냥 사라진다. 실측(2026-08-28)에서 ▶ 재생 은 되는데
-         * ▶ 대기 시작 은 "달력을 엽니다" 에서 멈춘 것이 정확히 이 경우였다
-         * (재생은 이미 안정된 화면에서, 대기 시작은 새로고침 직후에 누른다).
-         * 열릴 때까지 간격을 두고 다시 누른다. */
-        var input = U.dateInputEl();
-        if (!input) return false;
-        if (S.fixOpenAt && now - S.fixOpenAt < S.retryClickMs) return false;
-        U.fireClick(input);
-        lastClickAt = now;
-        S.fixOpenAt = now;
-        S.fixOpens = (S.fixOpens || 0) + 1;
-        S.fixPhase = 1;
-        save();
-        log('조회 날짜를 바꾸려고 달력을 엽니다 (목표 ' + want + ')'
-            + (S.fixOpens > 1 ? ' - ' + S.fixOpens + '회째' : ''));
-        return false;
-      }
-      if (!r.available) {
-        /* 09:00 직전이면 아직 예약 가능 창 밖이다. 곧 열리므로 기다린다. */
+      /* 조회 결과 가운데의 날짜 띠를 누른다. 페이지 이동 없이 그 자리에서 다시
+       * 조회된다.
+       *
+       * 위쪽 검색 위젯(날짜칸 → 달력 → [항공편 검색])으로 가는 길도 만들어봤는데
+       * 실측(2026-08-28)에서 복불복이었다 - 될 때도 있고 달력 페이지로 되돌아갈
+       * 때도 있었다. 되돌아가면 우리가 건너뛰려던 바로 그 페이지다. 그래서 버렸다. */
+      var r = U.findStripDate(want);
+      if (!r || !r.el) return false;           // 아직 안 그려졌다 - 기다린다
+      if (!r.selectable) {
+        /* 09:00 직전이면 그 날이 아직 안 열렸다. 화면이 새로 그려지면 같은 칸이
+         * '선택 가능' 으로 바뀐다. 기다린다. */
         return false;
       }
       U.fireClick(r.el);
       lastClickAt = now;
       S.fixClickAt = now;
+      S.fixOpens = (S.fixOpens || 0) + 1;
       S.fixPhase = 2; save();
-      log(want + ' 을(를) 눌렀습니다 - 조회가 갱신되기를 기다립니다');
+      log(want + ' 을(를) 날짜 띠에서 눌렀습니다 - 조회가 갱신되기를 기다립니다');
       return false;
     }
 
     /* 2단계: 눌렀는데 서버가 아직 그 날짜를 말하지 않는다.
      *
-     * 실측(2026-08-27): 달력에서 날짜를 고르면 머리말만 바뀌고 목록은 그대로였다.
-     * 즉 날짜 선택만으로는 다시 조회되지 않고 조회 버튼을 눌러야 한다.
-     * 잠깐 기다려보고(자동으로 되는 화면일 수도 있다) 안 되면 그 버튼을 찾아 누른다. */
-    if (now - S.fixClickAt > S.retryClickMs
-        && (!S.fixSearchAt || now - S.fixSearchAt > S.retryClickMs * 2)) {
-      var btn = findSearchButton();
-      if (btn) {
-        U.fireClick(btn);
-        lastClickAt = now;
-        S.fixSearchAt = now;
-        save();
-        log('조회가 갱신되지 않아 [' + U.label(btn).slice(0, 12) + '] 을(를) 누릅니다');
-        return false;
-      }
-      if (!S.fixSearchAt) {
-        S.fixSearchAt = -1;   // 못 찾았다는 표시 - 멈출 때 이유에 쓴다
-        save();
-      }
+     * 날짜 띠는 페이지 이동 없이 다시 조회하므로 보통은 잠시 기다리면 온다. 다만
+     * 새로고침 직후에는 페이지가 클릭 핸들러를 아직 안 붙여 클릭이 그냥 사라질 수
+     * 있다(실측: ▶ 재생 은 되는데 ▶ 대기 시작 은 안 됐다). 그래서 한 번만 누르고
+     * 기다리지 않고, 갱신이 안 오면 다시 눌러본다. */
+    if (now - S.fixClickAt > S.retryClickMs * 2) {
+      S.fixPhase = 0;
+      save();
+      log('조회가 갱신되지 않아 ' + want + ' 을(를) 다시 누릅니다 ('
+          + (S.fixOpens || 0) + '회째)');
     }
-
     return false;
   }
 
-  /* 조회 화면에서 '다시 조회' 에 해당하는 버튼. 날짜만 바꾸면 목록이 안 바뀐다.
-   *
-   * 실측(2026-08-27): #flight-widget__btn, 라벨 "항공편 검색".
-   * id 를 먼저 본다 - 라벨은 문구가 바뀌면 놓치고, 실제로 "항공편 조회" 로 넣어뒀다가
-   * "항공편 검색" 을 못 찾은 적이 있다. 라벨은 id 가 바뀌었을 때를 위한 보험이다.
-   *
-   * 눌러도 되는지는 그 뒤 서버 응답으로 확인하므로 조금 넓게 잡아도 된다. */
-  var SEARCH_SEL = '#flight-widget__btn';
-  var SEARCHY = /^(항공편\s*)?(조회|검색|재조회)$/;
-  function findSearchButton() {
-    var byId = U.findEl(SEARCH_SEL, '');
-    if (byId && U.visible(byId) && U.hittable(byId)) return byId;
-    var all = U.candidates(document);
-    for (var i = 0; i < all.length; i++) {
-      var el = all[i];
-      if (U.inChrome(el) || !U.visible(el) || !U.hittable(el)) continue;
-      var t = U.label(el).trim();
-      if (t.length <= 12 && SEARCHY.test(t)) return el;
-    }
-    return null;
-  }
 
   function tick() {
     if (!S.playing) return;
@@ -1750,42 +1823,43 @@ try {
     } else {
       blockedEl = null;
     }
-
-    /* 목표 날짜를 지정해뒀으면, 자동 감지한 최신 오픈일이 그 날짜가 맞는지 확인한다.
-     * 안 맞으면 누르지 않고 멈춘다 - 엉뚱한 날짜로 마일리지가 빠지는 게 최악이다. */
+    /* 목표 날짜를 정했으면 그 날짜 칸을 직접 찾아왔다(findOpenDate). 그래도 라벨을
+     * 한 번 더 대조한다 - 엉뚱한 날짜로 마일리지가 빠지는 게 최악이다. */
     if (step.dynamicDate && el && S.expectDate) {
       var got = U.label(el);
-      /* "08-27", "8/27", "08월 27일" 을 모두 같은 날로 본다. 예전에는 입력 문자열이
-       * 라벨에 그대로 들어있는지만 봐서, 형식이 조금만 달라도 무조건 멈췄다. */
       var same = U.sameDate(S.expectDate, got);
-      if (same === null) {
-        pause('목표 날짜를 해석하지 못했습니다 (예: 08-27) - 입력: ' + S.expectDate
-              + ' / 감지: ' + got.slice(0, 30));
-        return;
-      }
-      if (!same) {
-        /* 목표 날짜가 화면에 없다 = 아직 안 열렸거나 화면이 낡았다는 뜻이다.
-         * 멈춰서 기다리는 건 09:00 경쟁에서 최악이다 - 새로고침해서 다시 본다.
-         * 서버를 두드리는 일이라 간격에 하한을 두고, 오래 안 열리면 사람을 부른다. */
-        if (!S.openWaitSince) S.openWaitSince = now;
-        if (now - S.openWaitSince > S.openWaitMaxMs) {
-          finish('목표 날짜(' + S.expectDate + ')가 ' + Math.round(S.openWaitMaxMs / 1000)
-                 + '초 동안 안 열렸습니다 - 화면을 확인하세요 (마지막 감지: '
-                 + got.slice(0, 24) + ')', true);
-          return;
-        }
-        if (now - lastOpenReloadAt < S.openRetryMs) return;
-        lastOpenReloadAt = now;
-        S.idx = 0;
-        save();
-        log('목표 날짜(' + S.expectDate + ')가 아직 없습니다 (감지: ' + got.slice(0, 20)
-            + ') - 새로고침하고 다시 봅니다');
-        setTimeout(function () { location.reload(); }, 0);
+      if (same !== true) {
+        pause('찾은 날짜가 목표와 다릅니다 - 목표: ' + S.expectDate
+              + ' / 화면: ' + got.slice(0, 30));
         return;
       }
       S.openWaitSince = 0;
-    S.times = []; S.stepStartedAt = Date.now();
+      S.times = []; S.stepStartedAt = Date.now();   // 열리기를 기다린 시간은 빼고 센다
     }
+
+    /* 목표 날짜 칸이 아직 화면에 없다 = 그 날이 아직 안 열렸다는 뜻이다.
+     * 멈춰서 기다리는 건 09:00 경쟁에서 최악이므로 새로고침해서 다시 본다.
+     * 서버를 두드리는 일이라 간격에 하한을 두고, 오래 안 열리면 사람을 부른다. */
+    if (step.dynamicDate && !el && S.expectDate && !blockedEl) {
+      if (!S.openWaitSince) S.openWaitSince = now;
+      if (now - S.openWaitSince > S.openWaitMaxMs) {
+        var seen = U.openDateCells(step.idPrefix).map(function (c) {
+          return U.monthDay(U.label(c));
+        }).filter(Boolean);
+        finish('목표 날짜(' + S.expectDate + ')가 ' + Math.round(S.openWaitMaxMs / 1000)
+               + '초 동안 안 열렸습니다 - 화면을 확인하세요 (달력에 있는 날: '
+               + (seen.slice(-8).join(', ') || '없음') + ')', true);
+        return;
+      }
+      if (now - lastOpenReloadAt < S.openRetryMs) return;
+      lastOpenReloadAt = now;
+      S.idx = 0;
+      save();
+      log('목표 날짜(' + S.expectDate + ')가 아직 달력에 없습니다 - 새로고침하고 다시 봅니다');
+      setTimeout(function () { location.reload(); }, 0);
+      return;
+    }
+
     if (!el) {
       phase(blockedEl ? '가림' : '요소 없음', now);
       beganWaiting(now);
@@ -1885,6 +1959,11 @@ try {
        * 창이 떴는지 확인한 뒤에 알린다. */
       if (payBefore !== null) {
         S.playing = false;      // 더 이상 tick 이 돌지 않게 하되, 알림은 판정 후에
+        S.endedAt = Date.now();
+        /* 결제창이 떴는지는 1.5초 뒤에 안다. 그런데 그 사이에 페이지가 넘어가면
+         * 그 판정이 영영 안 온다 - 그러면 단계별 소요시간도 같이 사라진다.
+         * 지금 아는 것만이라도 먼저 남긴다. 뒤에 판정이 오면 덮어쓴다. */
+        S.message = '결제하기를 눌렀습니다 - 결제창 확인 중' + timeReport();
         save();
         setTimeout(function () {
           var o = S.lastOpen;
@@ -2531,6 +2610,15 @@ try {
     if (S.startAt === 'departure') {
       toast('조회 화면에서 시작할 수 없습니다 (' + plan.why + ') - 달력부터 진행합니다', true);
     }
+    /* 달력 모드인데 달력 화면이 아니면, 그 자리에서 새로고침해봐야 1단계(달력 날짜)
+     * 를 영영 못 찾는다. 지나가며 붙잡아둔 달력 주소가 있으면 그리로 간다. */
+    var base = R.state.baseLink;
+    if (S.startAt !== 'departure' && base
+        && location.pathname.indexOf(R.state.steps[0].url || '') < 0) {
+      toast('발사 (' + reason + ') - 달력으로 이동 후 재생 @ ' + fmtKst(nowSrv()));
+      setTimeout(function () { location.href = base; }, 0);
+      return true;
+    }
     toast('발사 (' + reason + ') - 새로고침 후 재생 @ ' + fmtKst(nowSrv()));
     setTimeout(function () { location.reload(); }, 0);
     return true;
@@ -2636,7 +2724,15 @@ try {
           cdEl.style.color = d < 10000 ? '#c00' : '#333';
         }
       } else {
-        cdEl.textContent = 'T+' + Math.floor(-d / 1000) + 's';
+        /* 발사 시각이 지난 뒤. 무장도 재생도 아니면 계속 올라가는 숫자는 아무
+         * 의미가 없다 - 33초에 끝난 실행이 한 시간 뒤 6349초로 보였다.
+         * 지나간 지 오래면 그냥 '지난 시각' 이라고만 한다. */
+        var R5 = REC();
+        var live = S.armed || (R5 && R5.state.playing);
+        var past = Math.floor(-d / 1000);
+        cdEl.textContent = live ? ('T+' + past + 's')
+          : past < 300 ? ('발사 시각 ' + past + '초 지남')
+          : '발사 시각이 지났습니다 (대기 중 아님)';
         cdEl.style.color = '#c00';
       }
       /* 안전망: 카운트다운 루프에서도 발사한다.

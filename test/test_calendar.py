@@ -60,6 +60,26 @@ def main() -> int:
                 got = pg.evaluate("(e) => KE_UTIL.sameDate(e, KE_UTIL.label(KE_UTIL.findLatestOpenDate()))",
                                   expect)
                 check(got is want, f"목표 날짜 {expect!r} -> {want} (실제 {got})")
+            # ---- 목표 날짜가 '가장 나중 날짜' 가 아니어도 그 날을 고른다 ----
+            # 실측(2026-08-28): 목표 08-18 인데 늘 최신일(08-22)만 찾아놓고
+            # "목표 날짜가 아직 없습니다" 하며 달력만 무한 새로고침했다.
+            pg.goto(FIXTURE)
+            pg.wait_for_timeout(900)
+            got = pg.evaluate("() => KE_UTIL.label(KE_UTIL.findOpenDate('dep-fare-', '08-20'))")
+            check("08월 20일" in (got or ""),
+                  "목표가 최신일이 아니어도 그 날짜 칸을 집는다", str(got))
+            got = pg.evaluate("() => KE_UTIL.label(KE_UTIL.findOpenDate('dep-fare-', ''))")
+            check("08월 22일" in (got or ""),
+                  "목표를 안 정하면 가장 나중 날짜를 집는다 (지금까지 하던 대로)", str(got))
+            got = pg.evaluate("() => KE_UTIL.findOpenDate('dep-fare-', '08-23')")
+            check(got is None,
+                  "매진/비활성 날짜는 집지 않는다", str(got))
+            got = pg.evaluate("() => KE_UTIL.findOpenDate('dep-fare-', '12-25')")
+            check(got is None, "달력에 없는 날은 집지 않는다", str(got))
+            seen = pg.evaluate("() => KE_UTIL.openDateCells('dep-fare-')"
+                               ".map(c => KE_UTIL.monthDay(KE_UTIL.label(c)))")
+            check(seen == ["08-19", "08-20", "08-21", "08-22"],
+                  f"고를 수 있는 날 목록을 그대로 알려준다 (실제 {seen})")
         finally:
             ctx.close()
 

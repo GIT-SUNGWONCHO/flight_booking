@@ -320,6 +320,15 @@
     if (S.startAt === 'departure') {
       toast('조회 화면에서 시작할 수 없습니다 (' + plan.why + ') - 달력부터 진행합니다', true);
     }
+    /* 달력 모드인데 달력 화면이 아니면, 그 자리에서 새로고침해봐야 1단계(달력 날짜)
+     * 를 영영 못 찾는다. 지나가며 붙잡아둔 달력 주소가 있으면 그리로 간다. */
+    var base = R.state.baseLink;
+    if (S.startAt !== 'departure' && base
+        && location.pathname.indexOf(R.state.steps[0].url || '') < 0) {
+      toast('발사 (' + reason + ') - 달력으로 이동 후 재생 @ ' + fmtKst(nowSrv()));
+      setTimeout(function () { location.href = base; }, 0);
+      return true;
+    }
     toast('발사 (' + reason + ') - 새로고침 후 재생 @ ' + fmtKst(nowSrv()));
     setTimeout(function () { location.reload(); }, 0);
     return true;
@@ -425,7 +434,15 @@
           cdEl.style.color = d < 10000 ? '#c00' : '#333';
         }
       } else {
-        cdEl.textContent = 'T+' + Math.floor(-d / 1000) + 's';
+        /* 발사 시각이 지난 뒤. 무장도 재생도 아니면 계속 올라가는 숫자는 아무
+         * 의미가 없다 - 33초에 끝난 실행이 한 시간 뒤 6349초로 보였다.
+         * 지나간 지 오래면 그냥 '지난 시각' 이라고만 한다. */
+        var R5 = REC();
+        var live = S.armed || (R5 && R5.state.playing);
+        var past = Math.floor(-d / 1000);
+        cdEl.textContent = live ? ('T+' + past + 's')
+          : past < 300 ? ('발사 시각 ' + past + '초 지남')
+          : '발사 시각이 지났습니다 (대기 중 아님)';
         cdEl.style.color = '#c00';
       }
       /* 안전망: 카운트다운 루프에서도 발사한다.

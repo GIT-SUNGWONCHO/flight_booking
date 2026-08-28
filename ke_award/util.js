@@ -331,6 +331,42 @@
    * 이틀 앞선 날짜를 골랐다(실측: 22일이어야 하는데 20일이 선택됨).
    * 등급 마커와 무관하게 "날짜 숫자가 있는 마지막 셀" 을 고른다. 엉뚱한 날 예매는
    * 목표 날짜 검사가 막는다 - 그게 훨씬 확실한 방어선이다. */
+  /* 목표 날짜를 정했으면 그 날짜 칸을 직접 찾는다.
+   *
+   * 예전에는 목표 날짜가 있어도 "가장 나중 날짜" 만 찾아놓고 목표와 다르면 새로고침을
+   * 반복했다. 목표가 최신일과 같을 때만 되는 구조라, 그렇지 않으면 영원히 돌았다
+   * (실측 2026-08-28: 목표 08-18, 감지 08-22 로 무한 새로고침).
+   *
+   * 09:00 에는 목표 날짜가 아직 안 열려 있는 게 정상이다 - 그때만 못 찾고,
+   * 그 경우에만 새로고침해서 다시 본다. */
+  function findOpenDate(idPrefix, want) {
+    if (!want) return findLatestOpenDate(idPrefix);
+    var md = monthDay(want);
+    if (!md) return null;
+    var list = openDateCells(idPrefix);
+    for (var i = 0; i < list.length; i++) {
+      if (sameDate(md, label(list[i])) === true) return list[i];
+    }
+    return null;
+  }
+
+  /* 지금 고를 수 있는 날짜 칸들 (문서 순서). */
+  function openDateCells(idPrefix) {
+    idPrefix = idPrefix || 'dep-fare-';
+    var list, out = [];
+    try { list = document.querySelectorAll('[id^="' + idPrefix + '"]'); } catch (e) { return out; }
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (!visible(el)) continue;
+      if (el.getAttribute('aria-disabled') === 'true' || el.disabled) continue;
+      var cls = typeof el.className === 'string' ? el.className : '';
+      if (/disable|unavail|soldout/i.test(cls)) continue;
+      if (!/\d/.test(label(el))) continue;    // 달력 여백 칸(빈 셀) 제외
+      out.push(el);
+    }
+    return out;
+  }
+
   function findLatestOpenDate(idPrefix) {
     idPrefix = idPrefix || 'dep-fare-';
     var list;
@@ -445,6 +481,61 @@
     return { el: null, available: false, why: md + ' 칸을 그 달 달력에서 찾지 못했습니다' };
   }
 
+  /* 조회 결과 가운데의 날짜 띠. 이걸 눌러야 그 자리에서 다시 조회된다.
+   *
+   * 실측(2026-08-28):
+   *   #flexible-date > li.flexible-date__item > button.flexible-date__link.-active
+   *   라벨 "출발일 21 (토) 선택 가능"
+   *
+   * 위쪽 검색 위젯의 날짜칸을 고치고 [항공편 검색] 을 누르는 길도 있는데, 그건
+   * 달력 페이지로 되돌아간다. 건너뛰려던 바로 그 페이지다. 여기 띠를 눌러야 한다.
+   *
+   * 라벨에 월이 없다("21 (토)"). 목표 날짜의 일자만 맞춰 보고, 진짜 그 날짜로
+   * 조회됐는지는 서버 응답으로 확인한다. */
+  var STRIP_SEL = '#flexible-date li, [class*="flexible-date__item"]';
+
+  function findStripDate(mmdd) {
+    var md = monthDay(mmdd);
+    if (!md) return null;
+    /* 띠 라벨에는 월이 없다("21 (토)"). 그래서 일자만 맞춰 보면 다른 달의 같은
+     * 일자를 집는다 - 12-25 를 찾다가 8월 25일을 누르는 식이다. 지금 화면이 몇 월을
+     * 보고 있는지는 검색 위젯의 날짜칸이 알려주므로, 달이 다르면 아예 없다고 한다. */
+    var now = searchedDate();
+    if (now && now.slice(0, 2) !== md.slice(0, 2)) {
+      return { el: null, selectable: false,
+               why: md + ' 은(는) 이 화면(' + now + ')의 날짜 띠에 없습니다 (다른 달)' };
+    }
+    /* 띠 라벨에는 월이 없다("21 (토)"). 그래서 일자만 맞춰 보면 다른 달의 같은
+     * 일자를 집는다 - 12-25 를 찾다가 8월 25일을 누르는 식이다. 지금 화면이 몇 월을
+     * 보고 있는지는 검색 위젯의 날짜칸이 알려주므로, 달이 다르면 아예 없다고 한다. */
+    var nowMd = searchedDate();
+    if (nowMd && nowMd.slice(0, 2) !== md.slice(0, 2)) {
+      return { el: null, selectable: false,
+               why: md + ' 은(는) 이 화면(' + nowMd + ')의 날짜 띠에 없습니다 (다른 달)' };
+    }
+    var want = +md.slice(3), items;
+    try { items = document.querySelectorAll(STRIP_SEL); } catch (e) { return null; }
+    if (!items.length) return { el: null, selectable: false, why: '날짜 띠가 화면에 없습니다' };
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (!visible(it)) continue;
+      var t = label(it);
+      /* "출발일 21 (토) 선택 가능" - 출발일 뒤 숫자가 그 날의 일자다. */
+      var m = t.match(/출발일\s*(\d{1,2})/) || t.match(/(\d{1,2})/);
+      if (!m || +m[1] !== want) continue;
+      var btn = it.querySelector('button, a') || it;
+      var no = /없음/.test(t);                       // 좌석 없음 / 운항편 없음
+      var ok = !no && (/선택\s*가능/.test(t) || hasCls(btn, '-active') || hasCls(it, '-active'));
+      return { el: btn, selectable: ok, label: t.slice(0, 40),
+               why: ok ? '' : (md + ' 은(는) 아직 고를 수 없습니다: ' + t.slice(0, 24)) };
+    }
+    return { el: null, selectable: false, why: md + ' 이(가) 날짜 띠에 없습니다' };
+  }
+
+  function hasCls(el, c) {
+    try { return !!(el && el.classList && el.classList.contains(c)); } catch (e) { return false; }
+  }
+
   /** 조회 화면의 '가는 날' 입력칸. 눌러야 달력이 열린다.
    *
    * 셀렉터가 겹겹이 걸린다: 바깥 감싸개(div.-dateinput)도, 안쪽 실제 칸
@@ -536,12 +627,14 @@
   var U = {
     visible: visible, label: label, cssPath: cssPath, findEl: findEl, CLICKABLE: CLICKABLE,
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
-    findLatestOpenDate: findLatestOpenDate, inChrome: inChrome, realTarget: realTarget,
+    findLatestOpenDate: findLatestOpenDate, findOpenDate: findOpenDate,
+    openDateCells: openDateCells, inChrome: inChrome, realTarget: realTarget,
     findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
     onDeparture: onDeparture, searchedDate: searchedDate,
-    findPickerDate: findPickerDate, dateInputEl: dateInputEl, urlDates: urlDates, retarget: retarget,
+    findPickerDate: findPickerDate, dateInputEl: dateInputEl,
+    findStripDate: findStripDate, urlDates: urlDates, retarget: retarget,
     nextYearFor: nextYearFor,
     alreadyOn: alreadyOn
   };
