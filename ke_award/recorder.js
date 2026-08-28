@@ -34,6 +34,13 @@
   var U = W.KE_UTIL || window.KE_UTIL;
   var LS = 'ke_award_steps_v1';
 
+  /* 단계가 "어느 화면의 것인가" 를 나타내는 키. 녹화할 때와 재생 중 비교할 때가
+   * 반드시 같은 방식이어야 한다.
+   * (location.pathname 에는 쿼리스트링이 안 들어간다. 녹화는 search 까지 넣고
+   *  비교는 pathname 만 보면, 쿼리로 화면을 구분하는 사이트에서는 영원히 일치하지
+   *  않아 '페이지 이동 대기' 로 멈춘다) */
+  function hereUrl() { return location.pathname + location.search; }
+
   /* 이 라벨이 걸리면 재생을 멈추고 사람에게 넘긴다.
    * 마일리지와 현금이 실제로 빠져나가는 지점이라 자동으로 넘기지 않는다. */
   var PAY = /결제하기|결제및발권|발권하기|구매하기|purchase|paynow/;
@@ -330,7 +337,7 @@
    * 되돌아갈 곳이 없으면 튕긴 순간 그냥 멈추는 수밖에 없다. */
   try {
     if (S.steps.length && S.steps[0].url
-        && location.pathname.indexOf(S.steps[0].url) >= 0
+        && hereUrl().indexOf(S.steps[0].url) >= 0
         && location.href !== S.baseLink) {
       S.baseLink = location.href;
       save();
@@ -360,7 +367,7 @@
       sel: U.cssPath(t),
       text: U.label(t),
       tag: t.tagName.toLowerCase(),
-      url: location.pathname + location.search,
+      url: hereUrl(),
       // 날짜처럼 매일 바뀌는 라벨은 텍스트 폴백이 오히려 해롭다 -> 사용자가 끌 수 있게
       selectorOnly: false
     };
@@ -714,12 +721,12 @@
      * 페이지 이동이 예정된 것이고, 그 화면이 뜨기 전에는 누르지 않는다. */
     var prev = S.idx > 0 ? S.steps[S.idx - 1] : null;
     if (prev && step.url && prev.url && prev.url !== step.url
-        && location.pathname.indexOf(step.url) < 0) {
+        && hereUrl().indexOf(step.url) < 0) {
       phase('페이지 이동 대기', now);
       beganWaiting(now);
       if (tooLong(S.stepTimeoutMs)) {
         pause('단계 ' + (S.idx + 1) + ' 은 ' + step.url + ' 화면의 단계인데'
-              + ' 지금은 ' + location.pathname + ' 입니다 - 화면을 확인하세요'
+              + ' 지금은 ' + hereUrl() + ' 입니다 - 화면을 확인하세요'
               + hiddenNote());
       }
       return;
