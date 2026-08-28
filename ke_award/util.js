@@ -402,6 +402,26 @@
     return best;
   }
 
+  /** 조회 결과(운임 카드)가 화면에 그려졌는가.
+   *
+   * "고른 등급이 없다" 와 "페이지가 아직 안 떴다" 는 전혀 다른 상황인데, findCabin 은
+   * 둘 다 null 을 돌려준다. 구분하지 않으면 페이지가 뜨기도 전에 "좌석 없음" 으로
+   * 읽고 새로고침해서, 페이지가 뜰 틈이 없다 - 실측(2026-08-28)에서 조회 화면이
+   * 무한 새로고침만 했다. 달력에서 똑같은 사고를 이미 겪고 openDateCells 로 고쳤는데
+   * 좌석 쪽은 그대로였다.
+   *
+   * 등급이 무엇이든 운임 카드에는 마일 표시가 붙는다. 하나라도 있으면 목록이
+   * 그려진 것이고, 그때부터 "없다" 고 말할 수 있다. */
+  function cabinListReady() {
+    var all;
+    try { all = candidates(document); } catch (e) { return false; }
+    for (var i = 0; i < all.length; i++) {
+      if (!visible(all[i]) || inChrome(all[i])) continue;
+      if (label(all[i]).indexOf('마일') !== -1) return true;
+    }
+    return false;
+  }
+
   /* 위험품 안내 팝업은 끝까지 내려야 [확인] 이 열린다. "아래로 스크롤" 버튼이
    * 스크롤에 따라 움직이거나 화면 밖으로 밀리면 클릭이 빗나가 거기서 멈춘다.
    * 버튼을 누르는 것과 별개로, 스크롤 가능한 영역을 직접 바닥까지 내려 확실히 한다.
@@ -621,7 +641,8 @@
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
     findLatestOpenDate: findLatestOpenDate, findOpenDate: findOpenDate,
     openDateCells: openDateCells, inChrome: inChrome, realTarget: realTarget,
-    findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
+    findCabin: findCabin, cabinListReady: cabinListReady,
+    scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
     onDeparture: onDeparture, searchedDate: searchedDate,

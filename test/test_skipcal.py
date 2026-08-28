@@ -328,6 +328,23 @@ def main() -> int:
             check("depDate=20270821" in pg.url,
                   "첫 클릭이 먹혀도 다시 눌러서 결국 바꾼다", pg.url)
 
+            # ---------- 결과가 늦게 그려질 때 새로고침하면 안 된다 ----------
+            # 실측(2026-08-28): 조회 화면이 무한 새로고침만 했다. 페이지가 뜨지도
+            # 않았는데 "고른 등급이 없다" 로 읽고 새로고침해서, 뜰 틈이 없었다.
+            # 달력에서 이미 겪은 사고인데 좌석 쪽은 안 고쳐져 있었다.
+            land(DEP + "?depDate=20270821&openTo=21&drawAfter=2000", fresh_loads=True)
+            setup("08-21")
+            check(pg.evaluate("() => KE_UTIL.cabinListReady()") is False,
+                  "운임 카드가 아직 없으면 '목록 안 그려짐' 으로 본다")
+            pg.evaluate("() => KE_HUD.fire('결과가 늦게 그려짐')")
+            pg.wait_for_function("() => (window.__clicks||[]).includes('next')", timeout=30000)
+            loads = pg.evaluate("window.__loads")
+            # 발사 자체가 새로고침 한 번(1 -> 2)이다. 그 뒤로 더 부르면 안 된다 -
+            # 고치기 전에는 1.2초마다 계속 불러 페이지가 뜰 틈이 없었다.
+            check(loads <= 2,
+                  f"결과가 늦게 그려져도 그 사이에 다시 부르지 않는다 (로드 {loads}회)")
+            check(pg.evaluate("KE_REC.state.problem") is False, "문제 없이 끝났다")
+
             # ---------- 재생 / 연습 / 대기 시작이 똑같이 동작해야 한다 ----------
             # 셋은 시작하는 방식이 다르다(그 자리에서 / 10초 뒤 / 정시). 하지만
             # "무엇을 누르는가" 는 같아야 한다. 실측에서 ▶ 재생 만 되고 ▶ 대기 시작 은

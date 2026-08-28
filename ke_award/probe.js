@@ -233,6 +233,18 @@
   W.KE_PROBE = {
     hits: function () { return hits; },
     stamp: function () { return stamp; },
+    /* 좌석 조회 응답이 한 번이라도 왔는가.
+     *
+     * "고른 등급이 없다" 와 "페이지가 아직 안 떴다" 를 가르는 근거다. 화면만 보면
+     * 둘 다 '없음' 으로 보여서, 안 떴는데 새로고침 -> 또 안 뜸 -> 무한반복이 된다
+     * (실측 2026-08-28). 서버가 답을 준 뒤라면 목록이 비어 있어도 그건 사실이므로
+     * 그때는 새로고침해서 다시 보는 것이 맞다. */
+    answered: function () {
+      for (var i = 0; i < hits.length; i++) {
+        if (/availab/i.test(hits[i].url)) return true;
+      }
+      return false;
+    },
     summary: summary,
     seatTimeline: seatTimeline,
     storeHints: storeHints,

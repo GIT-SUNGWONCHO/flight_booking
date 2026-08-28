@@ -984,7 +984,19 @@
        * 달력에서 목표 날짜를 기다릴 때와 똑같이 다시 불러와서 본다.
        *
        * 단계 번호는 그대로 둔다 - 새로고침 뒤 이 단계부터 다시 본다. */
-      if (step.dynamicCabin && U.onDeparture() && waitedMs > S.retryClickMs) {
+      /* "그 등급이 없다" 와 "페이지가 아직 안 떴다" 는 전혀 다르다. 구분하지 않으면
+       * 안 떴는데 새로고침 -> 또 안 뜸 -> 무한반복이 된다(실측 2026-08-28).
+       * 달력에서 겪은 것과 같은 사고인데 좌석 쪽은 안 고쳐져 있었다.
+       *
+       * 근거는 둘. 서버가 조회 응답을 줬거나(목록이 비어 있어도 그건 사실이다),
+       * 화면에 운임 카드가 이미 그려졌거나. 둘 다 아니면 아직 안 뜬 것이다. */
+      var answered = false;
+      try {
+        var P2 = W.KE_PROBE || window.KE_PROBE;
+        answered = !!(P2 && P2.answered && P2.answered());
+      } catch (e) {}
+      if (step.dynamicCabin && U.onDeparture() && waitedMs > S.retryClickMs
+          && (answered || U.cabinListReady())) {
         if (!S.openWaitSince) S.openWaitSince = now;
         if (now - S.openWaitSince > S.openWaitMaxMs) {
           finish('"' + S.cabin + '" 좌석이 ' + Math.round(S.openWaitMaxMs / 1000)
@@ -994,7 +1006,7 @@
         if (now - lastOpenReloadAt < S.openRetryMs) return;
         lastOpenReloadAt = now;
         save();
-        log('"' + S.cabin + '" 좌석이 아직 없습니다 - 새로고침하고 다시 봅니다 ('
+        log('조회 결과에 "' + S.cabin + '" 이(가) 없습니다 - 새로고침하고 다시 봅니다 ('
             + Math.round((now - S.openWaitSince) / 1000) + '초째)');
         setTimeout(function () { location.reload(); }, 0);
         return;

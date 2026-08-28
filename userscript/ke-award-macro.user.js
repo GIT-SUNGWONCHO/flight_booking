@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.29.0
+// @version      1.30.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -420,6 +420,26 @@ try {
     return best;
   }
 
+  /** 조회 결과(운임 카드)가 화면에 그려졌는가.
+   *
+   * "고른 등급이 없다" 와 "페이지가 아직 안 떴다" 는 전혀 다른 상황인데, findCabin 은
+   * 둘 다 null 을 돌려준다. 구분하지 않으면 페이지가 뜨기도 전에 "좌석 없음" 으로
+   * 읽고 새로고침해서, 페이지가 뜰 틈이 없다 - 실측(2026-08-28)에서 조회 화면이
+   * 무한 새로고침만 했다. 달력에서 똑같은 사고를 이미 겪고 openDateCells 로 고쳤는데
+   * 좌석 쪽은 그대로였다.
+   *
+   * 등급이 무엇이든 운임 카드에는 마일 표시가 붙는다. 하나라도 있으면 목록이
+   * 그려진 것이고, 그때부터 "없다" 고 말할 수 있다. */
+  function cabinListReady() {
+    var all;
+    try { all = candidates(document); } catch (e) { return false; }
+    for (var i = 0; i < all.length; i++) {
+      if (!visible(all[i]) || inChrome(all[i])) continue;
+      if (label(all[i]).indexOf('마일') !== -1) return true;
+    }
+    return false;
+  }
+
   /* 위험품 안내 팝업은 끝까지 내려야 [확인] 이 열린다. "아래로 스크롤" 버튼이
    * 스크롤에 따라 움직이거나 화면 밖으로 밀리면 클릭이 빗나가 거기서 멈춘다.
    * 버튼을 누르는 것과 별개로, 스크롤 가능한 영역을 직접 바닥까지 내려 확실히 한다.
@@ -639,7 +659,8 @@ try {
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
     findLatestOpenDate: findLatestOpenDate, findOpenDate: findOpenDate,
     openDateCells: openDateCells, inChrome: inChrome, realTarget: realTarget,
-    findCabin: findCabin, scrollToBottom: scrollToBottom, hittable: hittable,
+    findCabin: findCabin, cabinListReady: cabinListReady,
+    scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,
     onDeparture: onDeparture, searchedDate: searchedDate,
@@ -662,7 +683,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.29.0', hash: '11a33ef' };
+  var B = { version: '1.30.0', hash: 'a18460b' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -908,6 +929,18 @@ try {
   W.KE_PROBE = {
     hits: function () { return hits; },
     stamp: function () { return stamp; },
+    /* 좌석 조회 응답이 한 번이라도 왔는가.
+     *
+     * "고른 등급이 없다" 와 "페이지가 아직 안 떴다" 를 가르는 근거다. 화면만 보면
+     * 둘 다 '없음' 으로 보여서, 안 떴는데 새로고침 -> 또 안 뜸 -> 무한반복이 된다
+     * (실측 2026-08-28). 서버가 답을 준 뒤라면 목록이 비어 있어도 그건 사실이므로
+     * 그때는 새로고침해서 다시 보는 것이 맞다. */
+    answered: function () {
+      for (var i = 0; i < hits.length; i++) {
+        if (/availab/i.test(hits[i].url)) return true;
+      }
+      return false;
+    },
     summary: summary,
     seatTimeline: seatTimeline,
     storeHints: storeHints,
@@ -1962,7 +1995,19 @@ try {
        * 달력에서 목표 날짜를 기다릴 때와 똑같이 다시 불러와서 본다.
        *
        * 단계 번호는 그대로 둔다 - 새로고침 뒤 이 단계부터 다시 본다. */
-      if (step.dynamicCabin && U.onDeparture() && waitedMs > S.retryClickMs) {
+      /* "그 등급이 없다" 와 "페이지가 아직 안 떴다" 는 전혀 다르다. 구분하지 않으면
+       * 안 떴는데 새로고침 -> 또 안 뜸 -> 무한반복이 된다(실측 2026-08-28).
+       * 달력에서 겪은 것과 같은 사고인데 좌석 쪽은 안 고쳐져 있었다.
+       *
+       * 근거는 둘. 서버가 조회 응답을 줬거나(목록이 비어 있어도 그건 사실이다),
+       * 화면에 운임 카드가 이미 그려졌거나. 둘 다 아니면 아직 안 뜬 것이다. */
+      var answered = false;
+      try {
+        var P2 = W.KE_PROBE || window.KE_PROBE;
+        answered = !!(P2 && P2.answered && P2.answered());
+      } catch (e) {}
+      if (step.dynamicCabin && U.onDeparture() && waitedMs > S.retryClickMs
+          && (answered || U.cabinListReady())) {
         if (!S.openWaitSince) S.openWaitSince = now;
         if (now - S.openWaitSince > S.openWaitMaxMs) {
           finish('"' + S.cabin + '" 좌석이 ' + Math.round(S.openWaitMaxMs / 1000)
@@ -1972,7 +2017,7 @@ try {
         if (now - lastOpenReloadAt < S.openRetryMs) return;
         lastOpenReloadAt = now;
         save();
-        log('"' + S.cabin + '" 좌석이 아직 없습니다 - 새로고침하고 다시 봅니다 ('
+        log('조회 결과에 "' + S.cabin + '" 이(가) 없습니다 - 새로고침하고 다시 봅니다 ('
             + Math.round((now - S.openWaitSince) / 1000) + '초째)');
         setTimeout(function () { location.reload(); }, 0);
         return;
