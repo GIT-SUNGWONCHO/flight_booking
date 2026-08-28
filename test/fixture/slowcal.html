@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8"><title>늦게 그려지는 달력 (픽스처)</title>
+<body>
+<h1>보너스 항공권 달력</h1>
+<!-- 실측(2026-08-28): 대기 시작을 누르면 빈 화면인 채로 무한 새로고침만 했다.
+     달력이 아직 안 그려진 것을 "그 날짜가 없다" 로 읽고 곧바로 새로고침해서,
+     페이지가 뜰 틈이 없었다. 여기서는 그 상황을 그대로 만든다:
+     처음에는 날짜 칸이 하나도 없고, delay 밀리초 뒤에 그려진다. -->
+<div id="cal"></div>
+<script>
+  window.__loads = (+sessionStorage.getItem('loads') || 0) + 1;
+  sessionStorage.setItem('loads', window.__loads);
+  window.__clicked = null;
+  var q = new URLSearchParams(location.search);
+  var delay = +(q.get('delay') || 1500);
+  var upto = +(q.get('upto') || 22);        // 이 날짜까지만 열려 있다
+  setTimeout(function () {
+    var cal = document.getElementById('cal');
+    for (var d = 16; d <= upto; d++) {
+      var td = document.createElement('div');
+      td.id = 'dep-fare-' + d;
+      td.textContent = d + ' 08월 ' + d + '일 (수) , 성수기 일반석';
+      (function (dd) {
+        td.addEventListener('click', function () { window.__clicked = dd; });
+      })(('0' + d).slice(-2));
+      cal.appendChild(td);
+    }
+  }, delay);
+</script>

@@ -434,15 +434,20 @@
           cdEl.style.color = d < 10000 ? '#c00' : '#333';
         }
       } else {
-        /* 발사 시각이 지난 뒤. 무장도 재생도 아니면 계속 올라가는 숫자는 아무
-         * 의미가 없다 - 33초에 끝난 실행이 한 시간 뒤 6349초로 보였다.
-         * 지나간 지 오래면 그냥 '지난 시각' 이라고만 한다. */
+        /* 발사 시각이 지난 뒤.
+         *
+         * 무장도 재생도 아니면 올라가는 숫자는 아무 의미가 없다. 끝난 뒤에도 계속
+         * 세면 "이번에 몇 초 걸렸나" 를 덮어버린다(실측: 26초에 끝났는데 화면에는
+         * '발사 시각 81초 지남'). 대신 방금 실행이 몇 초 걸렸는지를 보여준다. */
         var R5 = REC();
-        var live = S.armed || (R5 && R5.state.playing);
-        var past = Math.floor(-d / 1000);
-        cdEl.textContent = live ? ('T+' + past + 's')
-          : past < 300 ? ('발사 시각 ' + past + '초 지남')
-          : '발사 시각이 지났습니다 (대기 중 아님)';
+        if (S.armed || (R5 && R5.state.playing)) {
+          cdEl.textContent = 'T+' + Math.floor(-d / 1000) + 's';
+        } else if (R5 && R5.state.startedAt && R5.state.endedAt) {
+          cdEl.textContent = '지난 실행 '
+            + ((R5.state.endedAt - R5.state.startedAt) / 1000).toFixed(1) + '초';
+        } else {
+          cdEl.textContent = '대기 중 아님';
+        }
         cdEl.style.color = '#c00';
       }
       /* 안전망: 카운트다운 루프에서도 발사한다.

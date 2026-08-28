@@ -28,6 +28,7 @@ from ke_award.runner import launch_with_retry  # noqa: E402
 
 USERSCRIPT = ROOT / "userscript" / "ke-award-macro.user.js"
 FIXTURE = (ROOT / "test" / "fixture" / "calendar.html").as_uri()
+SLOWCAL = (ROOT / "test" / "fixture" / "slowcal.html").as_uri()
 
 fails: list[str] = []
 
@@ -154,6 +155,55 @@ def main() -> int:
             check(st["problem"] is False,
                   "지난 실행 찌꺼기가 있어도 시작하자마자 실패하지 않는다", str(st))
             print(f"      {st['msg']}")
+
+            # 4) 실측 재현: 달력이 늦게 그려질 때 빈 화면인 채로 새로고침하면 안 된다.
+            #    "아직 안 그려졌다" 와 "그려졌는데 그 날이 없다" 는 전혀 다른 상황이다.
+            pg.goto(SLOWCAL + "?delay=1500&upto=22")
+            pg.wait_for_function("() => !!window.KE_REC", timeout=20000)
+            pg.evaluate("() => { sessionStorage.removeItem('loads'); }")
+            pg.reload()
+            pg.wait_for_function("() => !!window.KE_REC", timeout=20000)
+            pg.evaluate("""() => {
+              const S = KE_REC.state;
+              S.steps = [{sel:'#dep-fare-22', text:'22 08월 22일 (수)', tag:'div',
+                          url:'/x', dynamicDate:true}];
+              S.expectDate = '08-18';      // 늦게 그려지고, 최신일도 아니다
+              S.playing = false; S.playAfterReload = false;
+              KE_REC.save();
+              KE_REC.armForReload(0);
+              S.playAfterReload = false; S.playing = true;   // 새로고침 뒤와 같은 상태
+              KE_REC.save();
+            }""")
+            pg.wait_for_function("() => !!window.__clicked", timeout=20000)
+            st = pg.evaluate("() => ({clicked: window.__clicked, loads: window.__loads,"
+                             " problem: KE_REC.state.problem})")
+            check(st["clicked"] == "18",
+                  "늦게 그려져도 목표 날짜를 누른다", str(st))
+            check(st["loads"] == 1,
+                  f"달력이 뜨기도 전에 새로고침하지 않는다 (로드 {st['loads']}회)")
+            check(st["problem"] is False, "문제 없이 끝났다", str(st))
+
+            # 5) 달력은 그려졌는데 그 날이 정말 없으면 - 그때는 새로고침이 맞다
+            pg.goto(SLOWCAL + "?delay=200&upto=20")
+            pg.wait_for_function("() => !!window.KE_REC", timeout=20000)
+            pg.evaluate("() => { sessionStorage.removeItem('loads'); }")
+            pg.reload()
+            pg.wait_for_function("() => !!window.KE_REC", timeout=20000)
+            pg.evaluate("""() => {
+              const S = KE_REC.state;
+              S.steps = [{sel:'#dep-fare-20', text:'20 08월 20일 (수)', tag:'div',
+                          url:'/x', dynamicDate:true}];
+              S.expectDate = '08-22';      // upto=20 이라 달력에 없다
+              S.openRetryMs = 400;
+              S.playing = false; S.playAfterReload = false;
+              KE_REC.save();
+              KE_REC.armForReload(0);
+              S.playAfterReload = false; S.playing = true;
+              KE_REC.save();
+            }""")
+            pg.wait_for_function("() => (window.__loads || 0) >= 2", timeout=20000)
+            check(True, "달력이 그려졌는데 그 날이 없으면 새로고침해서 다시 본다")
+            pg.evaluate("() => { KE_REC.state.playing = false; KE_REC.save(); }")
         finally:
             ctx.close()
 

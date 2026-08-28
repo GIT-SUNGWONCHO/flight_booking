@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.27.0
+// @version      1.28.0
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -518,14 +518,6 @@ try {
     /* 띠 라벨에는 월이 없다("21 (토)"). 그래서 일자만 맞춰 보면 다른 달의 같은
      * 일자를 집는다 - 12-25 를 찾다가 8월 25일을 누르는 식이다. 지금 화면이 몇 월을
      * 보고 있는지는 검색 위젯의 날짜칸이 알려주므로, 달이 다르면 아예 없다고 한다. */
-    var now = searchedDate();
-    if (now && now.slice(0, 2) !== md.slice(0, 2)) {
-      return { el: null, selectable: false,
-               why: md + ' 은(는) 이 화면(' + now + ')의 날짜 띠에 없습니다 (다른 달)' };
-    }
-    /* 띠 라벨에는 월이 없다("21 (토)"). 그래서 일자만 맞춰 보면 다른 달의 같은
-     * 일자를 집는다 - 12-25 를 찾다가 8월 25일을 누르는 식이다. 지금 화면이 몇 월을
-     * 보고 있는지는 검색 위젯의 날짜칸이 알려주므로, 달이 다르면 아예 없다고 한다. */
     var nowMd = searchedDate();
     if (nowMd && nowMd.slice(0, 2) !== md.slice(0, 2)) {
       return { el: null, selectable: false,
@@ -670,7 +662,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.27.0', hash: '1fc8b83' };
+  var B = { version: '1.28.0', hash: '51cae50' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -1071,7 +1063,19 @@ try {
     optionalMs: 400,      // optional 단계 대기 (주 수단은 onlyIfPrev - 대기가 없다)
     gapMs: 80,            // 클릭 사이 최소 간격
     settleMs: 250,        // 이만큼 화면이 잠잠해야 다음 단계를 누른다
-    maxSettleMs: 2500,    // 계속 바뀌기만 하면 이 시간 뒤에는 그냥 누른다
+    /* 계속 바뀌기만 하면 이 시간 뒤에는 그냥 누른다.
+     *
+     * 2500 이었는데 실측(2026-08-28)에서 이 상한에 매번 걸렸다 - 대한항공 화면은
+     * 잠잠해지는 순간이 아예 없어서, 기다린 값을 한 번도 못 건지고 매 단계 2.5초를
+     * 그냥 버렸다. 27초 중 '화면 안정' 이 6~8초였다.
+     *
+     * 게다가 2.5초를 다 기다리고도 8단계(동의)에서는 클릭이 씹혀 직전 단계를 4번
+     * 다시 눌렀다. 기다린 것이 헛클릭을 막지도 못했다는 뜻이다.
+     *
+     * 줄여도 '무엇을 누를까' 는 그대로다(셀렉터·라벨·모달 가림 확인). 바뀌는 것은
+     * '언제 누를까' 뿐이고, 일찍 눌러 씹히면 재시도가 1.2초 뒤에 다시 누른다.
+     * 최악이 재시도 한 번, 대개는 1.3초를 번다. */
+    maxSettleMs: 1200,
     retryClickMs: 1200,   // 막혔을 때 직전 단계를 다시 눌러보는 간격
     /* 달력 건너뛰기(바로 시작)용. 조회 페이지를 지날 때마다 그 주소를 붙잡아둔다.
      * 주소 형식을 추측하지 않고 실제로 지나간 것을 쓰기 위한 것이다.
@@ -1097,17 +1101,47 @@ try {
      * 실측(2026-08-28): 창을 줄여놓고 돌렸더니 12단계에서 그 버튼을 못 찾고 멈췄다.
      * 녹화 당시 너비를 남겨두고, 지금 그보다 많이 좁으면 미리 알린다. */
     recordedWidth: 0,
-    bakedSig: ''          // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
+    bakedSig: '',         // 적용한 내장본의 지문. 바뀌면 내장본으로 덮는다
+    tuneSig: ''           // 적용한 타이밍 기본값의 지문. 바뀌면 새 값으로 덮는다
   };
+
+  /* 타이밍 값들. 사람이 패널에서 고치는 설정이 아니라 코드가 정하는 상수다.
+   *
+   * 그런데 상태와 함께 localStorage 에 저장돼서, 코드에서 기본값을 고쳐도 이미
+   * 쓰던 브라우저에는 영영 반영되지 않았다 - 저장된 옛날 값이 새 기본값을 덮는다.
+   * 실측(2026-08-28): maxSettleMs 를 2500 -> 1200 으로 줄였는데 화면에는 여전히
+   * '화면 안정 2.8s' 가 찍혔다. 바뀐 줄 알고 판단하면 엉뚱한 결론에 이른다.
+   *
+   * 기본값이 바뀌면 지문(tuneSig)이 달라지고, 그때 저장된 값을 새 기본값으로
+   * 덮는다. 지문이 같으면 손대지 않으므로, 시험하려고 잠깐 바꿔둔 값은 유지된다. */
+  var TUNING = ['stepTimeoutMs', 'optionalMs', 'gapMs', 'settleMs', 'maxSettleMs',
+                'retryClickMs', 'openRetryMs', 'openWaitMaxMs'];
+
+  function tuneSig() {
+    var out = '';
+    for (var i = 0; i < TUNING.length; i++) out += TUNING[i] + '=' + S[TUNING[i]] + ';';
+    return out;
+  }
+  var TUNE_SIG = tuneSig();     // 코드가 정한 값들의 지문 (load 전에 잡는다)
 
   function load() {
     try {
       var raw = localStorage.getItem(LS);
       if (raw) {
         var d = JSON.parse(raw);
+        var keep = {};
+        for (var i = 0; i < TUNING.length; i++) keep[TUNING[i]] = S[TUNING[i]];
         for (var k in d) if (k in S) S[k] = d[k];
+        if (d.tuneSig !== TUNE_SIG) {
+          for (var j = 0; j < TUNING.length; j++) S[TUNING[j]] = keep[TUNING[j]];
+          /* 여기서 log() 를 쓰면 안 된다 - listeners 가 아직 초기화 전이라
+           * emit() 에서 터지고 모듈 전체가 죽는다(패널이 통째로 안 뜬다). */
+          console.log('%c[KE_REC] 타이밍 기본값이 바뀌어 새 값으로 맞췄습니다: '
+                      + TUNE_SIG, 'color:#a0f;font-weight:bold');
+        }
       }
     } catch (e) {}
+    S.tuneSig = TUNE_SIG;
   }
   function save() {
     try { localStorage.setItem(LS, JSON.stringify(S)); } catch (e) {}
@@ -1335,7 +1369,15 @@ try {
     if (!waitingSince) { waitingSince = now; waitedMs = 0; hiddenMs = 0; lastWaitAt = now; return; }
     var d = now - lastWaitAt;
     lastWaitAt = now;
-    if (d <= 0 || d > 2000) return;          // 스로틀링으로 크게 벌어진 간격은 버린다
+    if (d <= 0) return;
+    /* 스로틀링으로 크게 벌어진 간격은 '버리지 말고 상한을 씌워' 담는다.
+     *
+     * 예전에는 2초를 넘으면 통째로 버렸다. 그런데 크롬이 가려진 창을 분 단위로
+     * 늦추면 매 tick 이 2초를 넘어 전부 버려진다 - waitedMs 가 영영 안 쌓여
+     * 제한시간에 걸리지 않고, pause/finish 가 안 불려 소리도 안 울린다.
+     * 창을 최소화하면 매크로가 '재생 중' 인 채 소리 없이 영원히 멈춘다.
+     * 09:00 에 이러면 화면을 볼 때까지 아무도 모른다. */
+    if (d > 2000) d = 2000;
     if (document.hidden) hiddenMs += d; else waitedMs += d;
   }
   function stopWaiting() { waitingSince = 0; waitedMs = 0; hiddenMs = 0; lastWaitAt = 0; }
@@ -1445,6 +1487,11 @@ try {
     ensurePhase = 0;
     retries = 0;
     lastOpenReloadAt = 0;
+    /* 상태(S)에 없는 모듈 지역 변수도 같이 지운다. 앞 실행이 pause/finish 로 끝나면
+     * markStep 이 안 불려 이것들이 그대로 남고, 다음 실행 1단계의 원인 분류에
+     * 지난 실행의 대기 시간이 실린다. */
+    phaseMs = {}; lastTickAt = 0;
+    lastMutAt = 0; blockedEl = null;
     stopWaiting();
   }
 
@@ -1837,10 +1884,20 @@ try {
       S.times = []; S.stepStartedAt = Date.now();   // 열리기를 기다린 시간은 빼고 센다
     }
 
-    /* 목표 날짜 칸이 아직 화면에 없다 = 그 날이 아직 안 열렸다는 뜻이다.
-     * 멈춰서 기다리는 건 09:00 경쟁에서 최악이므로 새로고침해서 다시 본다.
-     * 서버를 두드리는 일이라 간격에 하한을 두고, 오래 안 열리면 사람을 부른다. */
-    if (step.dynamicDate && !el && S.expectDate && !blockedEl) {
+    /* 목표 날짜 칸이 화면에 없다. 두 경우를 반드시 구분해야 한다:
+     *
+     *   달력이 아직 안 그려졌다      -> '없다' 가 아니라 '아직 모른다'. 기다린다
+     *   달력은 그려졌는데 그 날이 없다 -> 아직 안 열린 것. 새로고침해서 다시 본다
+     *
+     * 구분하지 않으면 페이지가 뜨기도 전에 새로고침해서 영영 안 뜬다 - 실측
+     * (2026-08-28)에서 빈 화면인 채로 무한 새로고침만 했다.
+     *
+     * 달력이 그려졌다는 증거는 '고를 수 있는 날짜 칸이 하나라도 있다' 는 것이다.
+     * 거기에 더해 잠시(retryClickMs) 기다려본다 - 두 달치를 나눠 그리는 중일 수도
+     * 있어서, 첫 칸이 나오자마자 판정하면 성급하다. */
+    if (step.dynamicDate && !el && S.expectDate && !blockedEl
+        && waitedMs > S.retryClickMs
+        && U.openDateCells(step.idPrefix).length) {
       if (!S.openWaitSince) S.openWaitSince = now;
       if (now - S.openWaitSince > S.openWaitMaxMs) {
         var seen = U.openDateCells(step.idPrefix).map(function (c) {
@@ -2724,15 +2781,20 @@ try {
           cdEl.style.color = d < 10000 ? '#c00' : '#333';
         }
       } else {
-        /* 발사 시각이 지난 뒤. 무장도 재생도 아니면 계속 올라가는 숫자는 아무
-         * 의미가 없다 - 33초에 끝난 실행이 한 시간 뒤 6349초로 보였다.
-         * 지나간 지 오래면 그냥 '지난 시각' 이라고만 한다. */
+        /* 발사 시각이 지난 뒤.
+         *
+         * 무장도 재생도 아니면 올라가는 숫자는 아무 의미가 없다. 끝난 뒤에도 계속
+         * 세면 "이번에 몇 초 걸렸나" 를 덮어버린다(실측: 26초에 끝났는데 화면에는
+         * '발사 시각 81초 지남'). 대신 방금 실행이 몇 초 걸렸는지를 보여준다. */
         var R5 = REC();
-        var live = S.armed || (R5 && R5.state.playing);
-        var past = Math.floor(-d / 1000);
-        cdEl.textContent = live ? ('T+' + past + 's')
-          : past < 300 ? ('발사 시각 ' + past + '초 지남')
-          : '발사 시각이 지났습니다 (대기 중 아님)';
+        if (S.armed || (R5 && R5.state.playing)) {
+          cdEl.textContent = 'T+' + Math.floor(-d / 1000) + 's';
+        } else if (R5 && R5.state.startedAt && R5.state.endedAt) {
+          cdEl.textContent = '지난 실행 '
+            + ((R5.state.endedAt - R5.state.startedAt) / 1000).toFixed(1) + '초';
+        } else {
+          cdEl.textContent = '대기 중 아님';
+        }
         cdEl.style.color = '#c00';
       }
       /* 안전망: 카운트다운 루프에서도 발사한다.

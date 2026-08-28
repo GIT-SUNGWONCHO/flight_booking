@@ -111,6 +111,12 @@ def main() -> int:
             cd = pg.evaluate("document.getElementById('ke-cd')?.textContent || ''")
             check("T+" not in cd,
                   "대기 중이 아니면 T+ 를 올리지 않는다", cd)
+            # 대신 방금 실행이 몇 초 걸렸는지를 보여준다 - 그게 알고 싶은 숫자다
+            check("지난 실행" in cd and "초" in cd,
+                  "끝난 뒤에는 이번 실행이 몇 초 걸렸는지를 보여준다", cd)
+            pg.wait_for_timeout(1200)
+            cd2 = pg.evaluate("document.getElementById('ke-cd')?.textContent || ''")
+            check(cd2 == cd, f"그 숫자는 더 이상 올라가지 않는다 ({cd!r} -> {cd2!r})")
             print(f"      카운트다운: {cd!r}")
 
             # ---- 3) 빠른 단계에는 군더더기를 붙이지 않는다 ----
