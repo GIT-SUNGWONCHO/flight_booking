@@ -7,6 +7,14 @@
   // 이 경우 시간은 '요소 없음' - 페이지가 느린 것이지 우리가 헛기다린 게 아니다.
   var LATE = +(new URLSearchParams(location.search).get('late') || 1500);
   var CHURN = location.search.indexOf('churn') >= 0;
+  /* pre: 다음 버튼이 클릭 전부터 이미 화면에 있다.
+   * 이러면 "없다가 나타났다" 는 증거가 없어 재생기는 화면이 잠잠해지기를 기다린다
+   * - '화면 안정' 이 지배적인 경우를 만들려면 이 상태여야 한다. */
+  if (location.search.indexOf('pre') >= 0) {
+    var pb = document.createElement('button');
+    pb.id = 'b'; pb.textContent = '동의';
+    document.getElementById('late').appendChild(pb);
+  }
   document.getElementById('a').addEventListener('click', function () {
     setTimeout(function () {
       var b = document.createElement('button');
@@ -15,9 +23,11 @@
     }, LATE);
     // churn: 버튼은 곧바로 있는데 화면이 계속 바뀐다 -> 시간은 '화면 안정' 으로 가야 한다
     if (CHURN) {
-      var b = document.createElement('button');
-      b.id = 'b'; b.textContent = '동의';
-      document.getElementById('late').appendChild(b);
+      if (!document.getElementById('b')) {
+        var b = document.createElement('button');
+        b.id = 'b'; b.textContent = '동의';
+        document.getElementById('late').appendChild(b);
+      }
       var n = 0, t = setInterval(function () {
         var d = document.createElement('span'); d.textContent = '.';
         document.body.appendChild(d);

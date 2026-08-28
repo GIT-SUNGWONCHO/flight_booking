@@ -83,13 +83,29 @@ def main() -> int:
             print(f"      {two['n']}단계 {two['ms']}ms ({two['why']})")
 
             # ---- 2) 버튼은 곧바로 있는데 화면이 계속 바뀐다 = 우리가 기다린 쪽 ----
-            times = run(pg, "?churn=1&late=99999")
+            # pre=1 로 버튼을 클릭 전부터 띄워둔다. "없다가 나타났다" 는 증거가 있으면
+            # 재생기는 기다리지 않고 바로 누르므로(그게 의도), 기다림이 실제로 생기는
+            # 상황을 만들어야 원인 분류를 검증할 수 있다.
+            times = run(pg, "?churn=1&pre=1&late=99999")
             two = next((t for t in times if t["n"] == 2), None)
             check(two is not None and (two.get("why") or "").startswith("화면 안정"),
                   "이번엔 '화면 안정' 이 지배적이라고 짚는다 (우리가 기다린 쪽)", str(two))
             check(two and "요소 없음" not in (two.get("why") or ""),
                   "페이지 탓으로 잘못 적지 않는다", str(two))
             print(f"      {two['n']}단계 {two['ms']}ms ({two['why']})")
+            settle_ms = two["ms"]
+
+            # ---- 3) 같은 churn 인데 버튼이 "없다가 나타나면" 기다리지 않는다 ----
+            # 앞 클릭이 먹었다는 직접적인 증거이므로 시간으로 짐작할 필요가 없다.
+            # 실측(2026-08-28): 이 대기가 25.7초 중 7.8초(30%)를 차지했다.
+            times = run(pg, "?churn=1&late=99999")
+            two2 = next((t for t in times if t["n"] == 2), None)
+            check(two2 is not None and two2["ms"] < settle_ms,
+                  f"새로 나타난 버튼은 기다리지 않고 바로 누른다 "
+                  f"({two2 and two2['ms']}ms < {settle_ms}ms)", str(two2))
+            check(two2 and not (two2.get("why") or "").startswith("화면 안정"),
+                  "그 경우 '화면 안정' 이 지배 원인이 아니다", str(two2))
+            print(f"      {two2['n']}단계 {two2['ms']}ms ({two2['why'] or '대기 없음'})")
 
             # ---- 시계는 끝나면 멈춰야 한다 ----
             # 실측(2026-08-28): 33초에 끝난 실행이 한 시간 뒤 6346초로 보였다.

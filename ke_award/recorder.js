@@ -447,6 +447,10 @@
    * 그래서 "화면이 잠잠해질 때까지" 기다렸다가 다음을 누른다.
    * 우리 패널은 시계를 50ms 마다 다시 그리므로 그 변화는 세지 않는다. */
   var lastMutAt = 0;
+  /* 다음 단계 요소가 앞 클릭 직전에 이미 있었는가. 없다가 나타났으면 앞 클릭이
+   * 먹었다는 증거가 되어 '화면 안정' 대기를 건너뛴다. 처음에는 알 수 없으므로
+   * 안전한 쪽(있었다 = 기다린다)으로 둔다. */
+  var nextWasPresent = true;
   var retries = 0;
   var blockedEl = null;   // 찾았지만 무언가에 가려 못 누르는 요소
   var lastLabel = '';     // 직전 단계에서 실제로 누른 요소의 라벨 (onlyIfPrev 판단용)
@@ -738,10 +742,24 @@
     }
 
     /* 앞 단계 결과가 반영되기 전에 누르면 클릭이 무시된다. 화면이 잠잠해질 때까지
-     * 기다린다. 계속 바뀌기만 하는 화면도 있으므로 상한을 둔다. */
+     * 기다린다. 계속 바뀌기만 하는 화면도 있으므로 상한을 둔다.
+     *
+     * 다만 기다림은 "앞 클릭이 먹었나" 를 시간으로 짐작하는 것일 뿐이다. 더 직접적인
+     * 증거가 있으면 짐작할 필요가 없다: 이 단계의 요소가 앞 클릭 직전에는 없었는데
+     * 지금 나타났고 누를 수 있다면, 그 등장 자체가 앞 클릭이 먹었다는 뜻이다.
+     * 실측(2026-08-28): 25.7초 중 '화면 안정' 이 7.8초(30%)였다. 대한항공 화면은
+     * 클릭 뒤 계속 다시 그려져서 잠잠해지는 250ms 를 못 건지고 상한만 채우는 일이 많다.
+     * 앞 클릭 직전에 이미 있던 요소면 구분이 안 되므로 종전대로 기다린다. */
     if (S.idx > 0 && lastClickAt) {
-      var quiet = now - Math.max(lastMutAt, lastClickAt);
-      if (quiet < S.settleMs && now - lastClickAt < S.maxSettleMs) { phase('화면 안정', now); return; }
+      var appeared = false;
+      if (!nextWasPresent) {
+        var early = locate(step);
+        appeared = !!(early && U.hittable(early));
+      }
+      if (!appeared) {
+        var quiet = now - Math.max(lastMutAt, lastClickAt);
+        if (quiet < S.settleMs && now - lastClickAt < S.maxSettleMs) { phase('화면 안정', now); return; }
+      }
     }
 
     /* ensure 단계: "지금 값이 want 면 그대로 두고, 아니면 골라서 맞춘다".
@@ -1070,6 +1088,15 @@
     /* 무언가를 눌렀다는 것은 기다리던 것이 나타났다는 뜻이다. 누적된 대기 시간을
      * 다음 단계로 넘기면, 뒤에서 잠깐 못 찾은 것이 곧바로 제한시간 초과가 된다. */
     S.openWaitSince = 0;
+
+    /* 다음 단계의 요소가 "지금 이미" 화면에 있는가를 눌러보기 직전에 기록해둔다.
+     * 없다가 나타나면 그건 이 클릭이 먹혔다는 직접적인 증거라, 화면이 잠잠해지기를
+     * 기다릴 필요가 없다 (아래 '화면 안정' 참고). 이미 있었다면 구분할 수 없으므로
+     * 종전대로 기다린다. */
+    try {
+      var nx = S.steps[S.idx + 1];
+      nextWasPresent = !!(nx && locate(nx));
+    } catch (e) { nextWasPresent = true; }
 
     /* 결제 단계는 눌렀다고 끝난 게 아니다. 팝업이 차단되면 로그만 남고 창은 안 뜬다.
      * 누르기 직전의 open 기록을 잡아두고, 잠시 뒤 새 기록이 생겼는지로 판정한다. */
