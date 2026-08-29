@@ -32,7 +32,8 @@
   if (W.KE_REC || window.KE_REC) return;
 
   var U = W.KE_UTIL || window.KE_UTIL;
-  var LS = 'ke_award_steps_v1';
+  // 탭마다 따로 저장한다 (노선별 탭을 동시에 돌릴 때 서로 덮어쓰지 않게)
+  var LS = U.tabKey('ke_award_steps_v1');
 
   /* 단계가 "어느 화면의 것인가" 를 나타내는 키. 녹화할 때와 재생 중 비교할 때가
    * 반드시 같은 방식이어야 한다.

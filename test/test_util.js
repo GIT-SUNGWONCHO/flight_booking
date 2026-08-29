@@ -227,5 +227,44 @@ function flightBlock(carrierText) {
   check('판정 불가면 통과시킴(스크롤해서 누르면 되므로)', U.hittable(covered) === true);
 }
 
+// ---- tabKey: 탭마다 저장소를 따로 쓴다 -------------------------------------------
+// localStorage 는 모든 탭이 공유해서, 노선별 탭을 동시에 돌리면 서로의 설정과
+// 진행 위치를 덮어쓴다 (실측 2026-08-29: 4노선 중 두 탭이 설정을 잃고 멈춤).
+{
+  const local = {}, session = {};
+  sandbox.localStorage = {
+    getItem: (k) => (k in local ? local[k] : null),
+    setItem: (k, v) => { local[k] = String(v); },
+  };
+  sandbox.sessionStorage = {
+    getItem: (k) => (k in session ? session[k] : null),
+    setItem: (k, v) => { session[k] = String(v); },
+  };
+
+  const k1 = U.tabKey('ke_award_steps_v1');
+  const k2 = U.tabKey('ke_award_steps_v1');
+  check('같은 탭에서는 늘 같은 키 (새로고침을 견딘다)', k1 === k2);
+  check('공용 키를 그대로 쓰지 않는다', k1 !== 'ke_award_steps_v1');
+
+  // 사이트가 sessionStorage.clear() 를 불러도 같은 탭이면 같은 키여야 한다
+  // (window.name 에 남겨둔 예비 표식으로 되찾는다)
+  delete session['ke_award_tab'];
+  const kAfterClear = U.tabKey('ke_award_steps_v1');
+  check('sessionStorage 가 지워져도 같은 탭이면 같은 키', kAfterClear === k1);
+
+  // 다른 탭 = sessionStorage 도 window.name 도 비어 있는 상태
+  delete session['ke_award_tab'];
+  sandbox.name = '';
+  const k3 = U.tabKey('ke_award_steps_v1');
+  check('다른 탭은 다른 키를 쓴다 (서로 안 덮어씀)', k3 !== k1);
+
+  // 처음 쓰는 탭은 예전 공용 값을 물려받아야 한다 (쓰던 녹화를 잃지 않게)
+  local['ke_award_hud_v1'] = '{"targetKst":"2026-08-30 09:00:00"}';
+  delete session['ke_award_tab'];
+  const k4 = U.tabKey('ke_award_hud_v1');
+  check('첫 방문은 예전 공용 값을 물려받는다',
+        local[k4] === '{"targetKst":"2026-08-30 09:00:00"}');
+}
+
 console.log(fail ? `\n${fail} FAILED` : '\n전체 통과');
 process.exit(fail ? 1 : 0);

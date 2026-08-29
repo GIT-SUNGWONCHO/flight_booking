@@ -22,7 +22,9 @@
 
   if (W.KE_HUD || window.KE_HUD) return;
 
-  var LS = 'ke_award_hud_v1';
+  var U0 = W.KE_UTIL || window.KE_UTIL;
+  // 탭마다 따로 저장한다 (노선별 탭이 서로의 오픈시각·무장 상태를 덮어쓰지 않게)
+  var LS = U0 && U0.tabKey ? U0.tabKey('ke_award_hud_v1') : 'ke_award_hud_v1';
   var S = {
     targetKst: '',        // "2026-08-22 10:00:00"
     /* 어느 화면에 서 있다가 발사할 것인가. 둘은 서 있어야 할 페이지가 다르다.

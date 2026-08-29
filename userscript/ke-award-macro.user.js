@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.39.0-dirty
+// @version      1.43.0-dirty
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -85,6 +85,46 @@ try {
     }
     var inp = el.querySelector && el.querySelector('input[type="checkbox"],input[type="radio"]');
     return !!(inp && inp.checked);
+  }
+
+  /* 저장 키를 탭마다 다르게 만든다.
+   *
+   * localStorage 는 같은 사이트의 모든 탭이 공유한다. 노선별로 탭을 띄워 동시에
+   * 돌리면 네 탭이 같은 키를 서로 덮어써서, 발사 뒤 새로고침할 때 "남이 마지막에
+   * 쓴 값" 을 읽는다. 실측(2026-08-29): 4노선 동시 실행에서 두 탭이 자기 설정
+   * (단계 수·목표 날짜)을 잃고 멈췄다. 진행 위치(idx)도 공유라 서로의 진행을
+   * 덮어쓸 수 있다.
+   *
+   * sessionStorage 는 탭마다 따로이고 새로고침은 견딘다 - 탭을 가리키는 표식으로 딱 맞다.
+   * 그 표식이 없는 첫 방문에는 예전 공용 키에서 한 번 옮겨와, 쓰던 사람이 녹화를
+   * 잃지 않게 한다. */
+  function tabKey(base) {
+    var id = null;
+    try { id = sessionStorage.getItem('ke_award_tab'); } catch (e) {}
+    /* sessionStorage 는 사이트가 sessionStorage.clear() 를 부르면 통째로 날아간다.
+     * 그러면 같은 탭인데도 새 표식을 받아 이전 진행/녹화를 못 찾는다.
+     * window.name 은 같은 탭 안에서 이동·새로고침을 견디고 clear() 에도 안 지워지므로
+     * 예비 표식으로 함께 남긴다. */
+    if (!id) {
+      try {
+        var m = /(?:^|;)ke_tab=([a-z0-9]+)/.exec(String(window.name || ''));
+        if (m) id = m[1];
+      } catch (e) {}
+    }
+    if (!id) id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    try { sessionStorage.setItem('ke_award_tab', id); } catch (e) {}
+    try {
+      var nm = String(window.name || '').replace(/(?:^|;)ke_tab=[a-z0-9]+/g, '');
+      window.name = (nm ? nm + ';' : '') + 'ke_tab=' + id;
+    } catch (e) {}
+    var key = base + ':' + id;
+    try {
+      if (localStorage.getItem(key) === null) {
+        var old = localStorage.getItem(base);      // 예전 공용 값에서 물려받는다
+        if (old !== null) localStorage.setItem(key, old);
+      }
+    } catch (e) {}
+    return key;
   }
 
   function label(el) {
@@ -686,7 +726,7 @@ try {
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
     findLatestOpenDate: findLatestOpenDate, findOpenDate: findOpenDate,
     openDateCells: openDateCells, inChrome: inChrome, realTarget: realTarget,
-    findCabin: findCabin, cabinListReady: cabinListReady,
+    findCabin: findCabin, cabinListReady: cabinListReady, tabKey: tabKey,
     operatedByKE: operatedByKE, cabinOnlyCodeshare: cabinOnlyCodeshare,
     scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
@@ -711,7 +751,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.39.0-dirty', hash: '5864360-dirty' };
+  var B = { version: '1.43.0-dirty', hash: '3aeb514-dirty' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -1071,7 +1111,8 @@ try {
   if (W.KE_REC || window.KE_REC) return;
 
   var U = W.KE_UTIL || window.KE_UTIL;
-  var LS = 'ke_award_steps_v1';
+  // 탭마다 따로 저장한다 (노선별 탭을 동시에 돌릴 때 서로 덮어쓰지 않게)
+  var LS = U.tabKey('ke_award_steps_v1');
 
   /* 단계가 "어느 화면의 것인가" 를 나타내는 키. 녹화할 때와 재생 중 비교할 때가
    * 반드시 같은 방식이어야 한다.
@@ -2561,7 +2602,9 @@ try {
 
   if (W.KE_HUD || window.KE_HUD) return;
 
-  var LS = 'ke_award_hud_v1';
+  var U0 = W.KE_UTIL || window.KE_UTIL;
+  // 탭마다 따로 저장한다 (노선별 탭이 서로의 오픈시각·무장 상태를 덮어쓰지 않게)
+  var LS = U0 && U0.tabKey ? U0.tabKey('ke_award_hud_v1') : 'ke_award_hud_v1';
   var S = {
     targetKst: '',        // "2026-08-22 10:00:00"
     /* 어느 화면에 서 있다가 발사할 것인가. 둘은 서 있어야 할 페이지가 다르다.
