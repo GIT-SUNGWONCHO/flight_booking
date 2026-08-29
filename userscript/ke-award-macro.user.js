@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.34.0
+// @version      1.35.0-dirty
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -683,7 +683,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.34.0', hash: 'c5873f2' };
+  var B = { version: '1.35.0-dirty', hash: 'ab33684-dirty' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -1488,6 +1488,23 @@ try {
     return !TOGGLEY.test(step.text || '');
   }
 
+  /* 더 눌러봐야 소용없는 안내. 좌석/운임이 이미 남의 것이 됐거나 세션이 끊긴 경우다.
+   *
+   * 실측(2026-08-29 09:00, 프레스티지 1석): 7단계까지 17.1초에 갔는데 그 사이
+   * 좌석이 나가서 "운임 및 좌석 상황이 변하여 예약을 완료할 수 없습니다" 팝업이 떴다.
+   * 도구는 그걸 못 알아보고 8단계(동의)를 찾으며 직전 단계를 16번 다시 눌렀다 -
+   * 21.6초를 버렸고, 그나마 누른 '확인' 은 그 에러 팝업의 확인 버튼이었다.
+   * 이런 문구가 화면에 보이면 즉시 멈추고 사람을 부른다. */
+  var FATAL = /운임\s*및\s*좌석\s*상황이\s*변하여|예약을\s*완료할\s*수\s*없습니다|좌석이\s*모두\s*예약|세션이\s*(종료|만료)/;
+
+  /** 화면에 실제로 보이는 글에서만 찾는다 (innerText 는 숨겨진 것을 빼고 준다). */
+  function fatalNotice() {
+    var t;
+    try { t = document.body ? document.body.innerText : ''; } catch (e) { return null; }
+    var m = t && t.match(FATAL);
+    return m ? m[0].replace(/\s+/g, ' ') : null;
+  }
+
   /* 막혀 있으면 직전 단계를 다시 눌러본다.
    * 사이트가 앞 단계를 처리하는 중에 눌러 클릭이 그냥 무시되는 일이 실제로 있었다
    * (연락처 확인을 눌렀는데 화면이 그대로였고 다음 단계가 나타나지 않음).
@@ -1498,6 +1515,10 @@ try {
     if (S.idx === 0) return false;
     if (blockedEl) return false;   // 가려서 못 누르는 거면 다시 눌러봤자다
     if (now - lastClickAt < S.retryClickMs) return false;
+    /* 좌석이 이미 나갔는데 다시 누르면 에러 팝업의 확인만 계속 누르게 된다.
+     * 여기서 끊어야 21초를 버리지 않고 사람이 바로 다음 수를 둘 수 있다. */
+    var bad = fatalNotice();
+    if (bad) { finish('사이트 안내: "' + bad.slice(0, 60) + '" - 더 진행할 수 없습니다', true); return false; }
     var prev = S.steps[S.idx - 1];
     if (!retryable(prev)) return false;
     var el = locate(prev);
@@ -2077,6 +2098,16 @@ try {
         return;
       }
 
+      /* 다시 눌러볼 수 없는 상황(가려짐/토글 단계 등)이라도, 사이트가 "더는 안 된다"
+       * 고 말하고 있으면 제한시간을 다 채울 이유가 없다. 매 tick 훑으면 비싸므로
+       * 잠깐 기다린 뒤부터만 본다. */
+      if (waitedMs > 1000) {
+        var stop = fatalNotice();
+        if (stop) {
+          finish('사이트 안내: "' + stop.slice(0, 60) + '" - 더 진행할 수 없습니다', true);
+          return;
+        }
+      }
       if (waitedMs > S.retryClickMs && retryPrevClick(now)) return;
       if (tooLong(S.stepTimeoutMs)) {
         // 스크린샷 한 장으로 원인 파악이 되도록 패널 상태줄에 진단 요약을 그대로 붙인다.

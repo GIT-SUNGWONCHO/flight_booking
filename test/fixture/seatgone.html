@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>좌석이 나갔을 때 (픽스처)</title>
+<h1>남이 먼저 예약을 끝낸 상황</h1>
+<button id="a">확인</button>
+<div id="stage"></div>
+<script>
+  /* 실측(2026-08-29 09:00, 프레스티지 1석): 7단계까지 갔는데 그 사이 좌석이 나가서
+   * 사이트가 "운임 및 좌석 상황이 변하여 예약을 완료할 수 없습니다" 팝업을 띄웠다.
+   * 다음 단계(동의)는 영영 나타나지 않고, 도구는 직전 단계를 16번 다시 눌렀다.
+   * 여기서는 [확인] 을 누르면 그 팝업만 뜨고 다음 단계는 안 나타나게 흉내낸다. */
+  document.getElementById('a').addEventListener('click', function () {
+    if (document.getElementById('err')) return;
+    var d = document.createElement('div');
+    d.id = 'err';
+    d.innerHTML = '<p>운임 및 좌석 상황이 변하여 예약을 완료할 수 없습니다.'
+                + ' 조건을 바꿔서 다시 검색해 주세요.</p>'
+                + '<button id="errok">확인</button>';
+    document.getElementById('stage').appendChild(d);
+  });
+</script>
