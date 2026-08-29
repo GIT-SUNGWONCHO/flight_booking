@@ -88,21 +88,39 @@ def main() -> int:
 
         if want:
             log(f"도착지 {want} 로 변경 시도")
+            # 도착지 버튼은 값이 있으면 "도착지 CDG 파리", 비어 있으면 "To 도착지" 로
+            # 라벨이 바뀐다 (새 프로필은 늘 비어 있다). 라벨로 찾으면 빈 상태에서
+            # 못 잡으므로, 상태와 무관한 클래스(-order3 = 도착지 칸)로 잡는다.
             page.evaluate("""(code) => {
               const U = window.KE_UTIL;
-              const btn = U.candidates(document).find(e => U.visible(e) && /^도착지/.test(U.label(e)));
+              const btn = U.candidates(document).find(e => U.visible(e)
+                && /ui-fromto__button/.test((e.className||'').toString())
+                && /-order3/.test((e.className||'').toString()));
               if (btn) U.fireClick(btn);
             }""", want)
             page.wait_for_timeout(2500)
             ok = page.evaluate("""(code) => {
               const U = window.KE_UTIL;
               const hit = U.candidates(document).find(e => U.visible(e) && U.label(e).indexOf(code) !== -1
-                                                          && !/^도착지/.test(U.label(e)));
-              if (hit) { U.fireClick(hit); return U.label(hit).slice(0,30); }
+                          && !/ui-fromto__button/.test((e.className||'').toString()));
+              if (hit) { U.fireClick(hit); return U.label(hit).replace(/\\s+/g,' ').slice(0,34); }
               return null;
             }""", want)
-            log(f"  도착지 선택: {ok or '실패(수동 확인 필요)'}")
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(2500)
+            now = page.evaluate("""() => {
+              const U = window.KE_UTIL;
+              const b = U.candidates(document).find(e => U.visible(e)
+                && /ui-fromto__button/.test((e.className||'').toString())
+                && /-order3/.test((e.className||'').toString()));
+              return b ? U.label(b).replace(/\\s+/g,' ').slice(0,30) : null;
+            }""")
+            log(f"  도착지 선택: {ok or '후보 못 찾음'} -> 현재 {now}")
+            if not now or want not in now:
+                # 엉뚱한 노선으로 조회하면 그때부터 전부 헛일이다. 여기서 끊는다.
+                print(json.dumps({"ok": False, "url": page.url,
+                                  "why": f"도착지를 {want} 로 못 바꿈 (현재: {now})"},
+                                 ensure_ascii=False))
+                return 6
 
         log("항공편 검색")
         page.evaluate("""() => {
