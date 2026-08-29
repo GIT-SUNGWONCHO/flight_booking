@@ -82,8 +82,12 @@ def main() -> int:
         ctx = b.contexts[0]
         js = USER.read_text(encoding="utf-8")
         ctx.add_init_script(js)
-        for p in list(ctx.pages):
-            if "pay.naver" in p.url or "payment-loading" in p.url:
+        # 지난 실행에서 남은 탭을 치운다. 결제창은 물론이고 결제 게이트에 멈춰 있는
+        # 탭도 자원을 잡아먹고, 노선 탭을 URL 로 골라낼 때 섞여 들어온다.
+        for p in list(ctx.pages)[1:]:
+            u = p.url
+            if ("pay.naver" in u or "payment-loading" in u
+                    or "/payment/gate" in u or u.strip() in ("about:blank", "")):
                 try: p.close()
                 except Exception: pass
 
