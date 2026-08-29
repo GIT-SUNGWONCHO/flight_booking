@@ -42,6 +42,20 @@ CHECK = """(day) => {
 }"""
 
 
+def wait_until(when: datetime) -> None:
+    """그 시각까지 기다린다.
+
+    time.sleep(남은초) 한 번으로 기다리면 안 된다 - macOS 가 잠든 동안 그 타이머는
+    멈춘다. 노트북 덮개를 닫아두면 깨어난 뒤에야 뒤늦게 깨어나 정작 그 시각을
+    한참 지나 시작한다. 벽시계를 계속 다시 보고 짧게짧게 나눠 기다린다.
+    """
+    while True:
+        left = (when - datetime.now(KST)).total_seconds()
+        if left <= 0.05:
+            return
+        time.sleep(min(10, max(0.05, left)))
+
+
 def at(spec: str) -> datetime:
     now = datetime.now(KST)
     if spec.startswith("+"):
@@ -71,8 +85,8 @@ def main() -> int:
         su = at(a.setup_at)
         w = (su - datetime.now(KST)).total_seconds()
         if w > 0:
-            log(f"셋업까지 {w:.0f}초 대기")
-            time.sleep(w)
+            log(f"셋업까지 {w:.0f}초 대기 ({su:%H:%M:%S})")
+            wait_until(su)
         cmd = [sys.executable, str(ROOT / "dev" / "setup.py"), a.route, "--tab", str(a.tab)]
         if a.date:
             cmd += ["--date", a.date]
@@ -99,7 +113,7 @@ def main() -> int:
         w = (t_start - datetime.now(KST)).total_seconds()
         if w > 0:
             log(f"감시 시작까지 {w:.0f}초 대기 ({t_start:%H:%M:%S})")
-            time.sleep(w)
+            wait_until(t_start)
 
         log(f"감시 시작 - {a.day} 가 열리는 순간을 찾는다")
         opened_at = None
