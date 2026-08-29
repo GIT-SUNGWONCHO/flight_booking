@@ -173,12 +173,67 @@ def main() -> int:
               if (btn) U.fireClick(btn);
             }""", want)
             page.wait_for_timeout(2500)
+
+            # 선택기는 '최근 검색' 만 보여준다. 처음 가는 도시는 목록에 없으므로
+            # '도시, 공항' 검색칸에 코드를 쳐 넣어야 후보가 나온다.
+            typed = page.evaluate("""(code) => {
+              const U = window.KE_UTIL;
+              let box = null;
+              const walk = (root, d) => {
+                if (d > 10 || box) return;
+                let els; try { els = root.querySelectorAll('input[type=text]'); } catch (e) { els = []; }
+                for (const e of els) {
+                  if (U.visible(e) && /도시|공항/.test(e.placeholder || '')) { box = e; return; }
+                }
+                let all; try { all = root.querySelectorAll('*'); } catch (e) { return; }
+                for (const e of all) { if (box) return; if (e.shadowRoot) walk(e.shadowRoot, d + 1); }
+              };
+              walk(document, 0);
+              if (!box) return false;
+              box.focus();
+              box.value = code;
+              box.dispatchEvent(new Event('input', { bubbles: true }));
+              box.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;
+            }""", want)
+            if typed:
+                log("  검색칸에 코드 입력")
+                page.wait_for_timeout(2500)
+
+            # 후보 고르기. 두 갈래를 다 본다.
+            #  1) '최근 검색' 목록 - 클릭 가능한 요소라 candidates 로 잡힌다
+            #  2) 검색 자동완성 - 항목이 ui-autocomplete__option-* 안의 SPAN/MARK/EM 이라
+            #     클릭 가능 목록에 안 걸린다. 도시명과 코드가 서로 다른 요소로 쪼개져 있어
+            #     (예: "밀라노/말펜사, 이탈리아" 와 <em>MXP</em>) 한 요소만 봐서는 못 찾는다.
+            #     실측(2026-08-29): 이걸 안 봐서 밀라노가 "없다" 고 잘못 판단했다.
+            #     -> 항목 행까지 올라가 행 전체 글자로 맞춘다.
             ok = page.evaluate("""(code) => {
               const U = window.KE_UTIL;
               const hit = U.candidates(document).find(e => U.visible(e) && U.label(e).indexOf(code) !== -1
                           && !/ui-fromto__button/.test((e.className||'').toString()));
               if (hit) { U.fireClick(hit); return U.label(hit).replace(/\\s+/g,' ').slice(0,34); }
-              return null;
+
+              let row = null;
+              const walk = (root, d) => {
+                if (d > 12 || row) return;
+                let els; try { els = root.querySelectorAll('*'); } catch (e) { return; }
+                for (const e of els) {
+                  if (row) return;
+                  if (/ui-autocomplete__option/.test((e.className||'').toString())) {
+                    let n = e;
+                    for (let i = 0; i < 4 && n; i++) {
+                      const t = (n.innerText || n.textContent || '').replace(/\\s+/g,' ');
+                      if (t.indexOf(code) !== -1 && U.visible(n)) { row = n; return; }
+                      n = n.parentElement;
+                    }
+                  }
+                  if (e.shadowRoot) walk(e.shadowRoot, d + 1);
+                }
+              };
+              walk(document, 0);
+              if (!row) return null;
+              U.fireClick(row);
+              return (row.innerText||'').replace(/\\s+/g,' ').slice(0,34);
             }""", want)
             page.wait_for_timeout(2500)
             now = page.evaluate("""() => {
