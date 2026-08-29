@@ -44,9 +44,18 @@
   var drawAfter = +(new URLSearchParams(location.search).get('drawAfter') || 0);
   function drawSeat() {
     if (!out) return;
+    /* 실제 화면은 편마다 "대한항공 운항" / "에어프랑스 운항" 표기를 달고, 운임 카드는
+       그 블록 안에 들어 있다. findCabin 은 코드셰어를 거르려고 이 표기를 보므로
+       픽스처도 같은 구조여야 한다. */
+    var blk = document.createElement('div');
+    blk.className = 'flight';
+    var op = document.createElement('div');
+    op.textContent = '편명 대한항공 운항 KE931';
+    blk.appendChild(op);
     var b = document.createElement('button');
     b.id = 'seat'; b.textContent = 'KE931 ICN→FCO 프레스티지 62,500 마일';   // findCabin 은 등급명 + 마일 을 본다
-    document.getElementById('seatbox').appendChild(b);
+    blk.appendChild(b);
+    document.getElementById('seatbox').appendChild(blk);
   }
   if (drawAfter) setTimeout(drawSeat, drawAfter); else drawSeat();
   var m = /depDate=(\d{8})/.exec(location.search);

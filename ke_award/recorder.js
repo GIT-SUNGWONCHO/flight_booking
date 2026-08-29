@@ -1106,7 +1106,9 @@
           : step.dynamicDate
           ? '최신 오픈일 셀을 못 찾음 (id 접두어: ' + (step.idPrefix || 'dep-fare-') + ')'
           : step.dynamicCabin
-            ? '"' + S.cabin + '" 좌석이 이 화면에 없습니다 (그날 그 등급이 안 열렸을 수 있음)'
+            ? (U.cabinOnlyCodeshare && U.cabinOnlyCodeshare(S.cabin)
+                 ? '"' + S.cabin + '" 은 코드셰어(외항사 운항)편에만 있습니다 - 대한항공 운항편에는 없어 건너뜁니다'
+                 : '"' + S.cabin + '" 좌석이 이 화면에 없습니다 (그날 그 등급이 안 열렸을 수 있음)')
             : U.diagnoseText(step.sel, step.selectorOnly ? '' : step.text);
         pause('단계 ' + (S.idx + 1) + ' 요소를 못 찾음: ' + (step.text || step.sel || '').slice(0, 30)
               + ' [' + diag + ']' + hiddenNote());

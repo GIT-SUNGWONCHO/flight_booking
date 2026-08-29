@@ -389,17 +389,44 @@
    * 편명이나 필요 마일리지가 바뀌어도, id/클래스(#classEconomyList0 등)가 등급마다
    * 달라도 그대로 동작한다. 같은 등급 카드가 여러 개면 라벨이 가장 짧은 것(=가장
    * 구체적인 요소)을 고른다. */
-  function findCabin(cabin) {
+  /* 이 운임 카드가 대한항공이 직접 띄우는 편의 것인가.
+   *
+   * 파리 노선처럼 조회 결과에 코드셰어가 같이 뜬다. KE5901 은 편명만 KE 이고 실제로는
+   * 에어프랑스 운항이라 편명으로는 못 가른다. 화면에는 편마다 "대한항공 운항" /
+   * "에어프랑스 운항" 이 붙으므로 그것을 본다.
+   * 카드에서 위로 올라가다 처음 만나는 '운항' 표기가 그 편의 것이다 (더 올라가면
+   * 두 편을 다 품은 목록이라 구분이 사라진다). */
+  function operatedByKE(el) {
+    var n = el;
+    for (var d = 0; d < 8 && n; d++) {
+      var t = '';
+      try { t = n.innerText || ''; } catch (e) {}
+      if (/운항/.test(t)) return /대한항공\s*운항/.test(t);
+      n = n.parentElement;
+    }
+    return false;   // 표기를 못 찾으면 보수적으로 제외한다
+  }
+
+  /** 좌석 등급으로 항공편 카드를 찾는다.
+   * opts.anyCarrier 를 켜지 않으면 대한항공 운항편만 고른다 (코드셰어 제외). */
+  function findCabin(cabin, opts) {
     if (!cabin) return null;
+    opts = opts || {};
     var all = candidates(document), best = null, bestLen = 1e9;
     for (var i = 0; i < all.length; i++) {
       var el = all[i];
       if (!visible(el) || inChrome(el)) continue;
       var t = label(el);
       if (t.indexOf(cabin) === -1 || t.indexOf('마일') === -1) continue;
+      if (!opts.anyCarrier && !operatedByKE(el)) continue;
       if (t.length < bestLen) { best = el; bestLen = t.length; }
     }
     return best;
+  }
+
+  /** 지금 화면에 그 등급이 코드셰어(외항사)로만 있는가. 멈출 때 이유를 정확히 말하려고. */
+  function cabinOnlyCodeshare(cabin) {
+    return !findCabin(cabin) && !!findCabin(cabin, { anyCarrier: true });
   }
 
   /** 조회 결과(운임 카드)가 화면에 그려졌는가.
@@ -642,6 +669,7 @@
     findLatestOpenDate: findLatestOpenDate, findOpenDate: findOpenDate,
     openDateCells: openDateCells, inChrome: inChrome, realTarget: realTarget,
     findCabin: findCabin, cabinListReady: cabinListReady,
+    operatedByKE: operatedByKE, cabinOnlyCodeshare: cabinOnlyCodeshare,
     scrollToBottom: scrollToBottom, hittable: hittable,
     monthDay: monthDay, sameDate: sameDate, findContaining: findContaining,
     loggedOut: loggedOut,

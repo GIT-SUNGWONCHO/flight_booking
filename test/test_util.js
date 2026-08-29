@@ -161,17 +161,51 @@ function check(name, cond) {
 }
 
 // ---- findCabin: 좌석 등급으로 항공편 카드 고르기 -------------------------------
+// 실제 화면은 편마다 "대한항공 운항" / "에어프랑스 운항" 이 붙은 블록 안에 운임 카드가
+// 들어 있다. 그 구조를 그대로 흉내낸다.
+function flightBlock(carrierText) {
+  return { tagName: 'DIV', parentElement: null, innerText: carrierText,
+           getAttribute: () => null };
+}
 {
-  const eco = makeEl('', '항공편명 KE901 일반석 52,500 마일', { tag: 'LABEL' });
-  const pres = makeEl('', '항공편명 KE901 프레스티지 90,000 마일', { tag: 'LABEL' });
+  const keBlock = flightBlock('편명 대한항공 운항 KE901 상세 보기');
+  const eco = makeEl('', '항공편명 KE901 일반석 52,500 마일', { tag: 'LABEL', parent: keBlock });
+  const pres = makeEl('', '항공편명 KE901 프레스티지 90,000 마일', { tag: 'LABEL', parent: keBlock });
   // 카드 전체를 감싸는 컨테이너: 같은 글자를 품지만 라벨이 더 길다 -> 골라선 안 된다
-  const wrap = makeEl('', '항공편명 KE901 일반석 52,500 마일 상세 보기 좌석 선택', { tag: 'DIV' });
+  const wrap = makeEl('', '항공편명 KE901 일반석 52,500 마일 상세 보기 좌석 선택',
+                      { tag: 'DIV', parent: keBlock });
   POOL = [wrap, eco, pres];
 
   check('연습용 일반석 카드를 고름', U.findCabin('일반석') === eco);
   check('실전 프레스티지 카드를 고름', U.findCabin('프레스티지') === pres);
   check('그날 안 열린 등급은 null (엉뚱한 등급 클릭 방지)', U.findCabin('일등석') === null);
   check('등급을 안 정하면 null', U.findCabin('') === null);
+}
+
+// ---- 코드셰어(외항사 운항)편은 고르지 않는다 -------------------------------------
+// 파리 노선 실측(2026-08-29): KE901 프레스티지는 매진이고 KE5901(에어프랑스 운항)에만
+// 1석이 있었다. 편명이 KE 로 시작해서 편명만으로는 못 가른다. 목적은 대한항공 탑승이고
+// 코드셰어는 추가 팝업까지 끼어들어 흐름도 막혔다 - 아예 고르지 않는 것이 맞다.
+{
+  const keBlock = flightBlock('편명 대한항공 운항 KE901 상세 보기');
+  const afBlock = flightBlock('편명 KE5901 에어프랑스 운항 상세 보기');
+  const keEco = makeEl('', '항공편명 KE901 일반석 52,500 마일', { tag: 'LABEL', parent: keBlock });
+  const afPres = makeEl('', '항공편명 KE5901 프레스티지석 92,500 마일 1 석',
+                        { tag: 'LABEL', parent: afBlock });
+  POOL = [keEco, afPres];
+
+  check('대한항공 운항편은 고른다', U.findCabin('일반석') === keEco);
+  check('코드셰어에만 있는 등급은 안 고른다', U.findCabin('프레스티지') === null);
+  check('anyCarrier 를 켜면 코드셰어도 고른다',
+        U.findCabin('프레스티지', { anyCarrier: true }) === afPres);
+  check('"코드셰어에만 있음" 을 구분해 알려준다',
+        U.cabinOnlyCodeshare('프레스티지') === true);
+  check('대한항공에 있으면 코드셰어전용이 아니다',
+        U.cabinOnlyCodeshare('일반석') === false);
+
+  // 운항사 표기를 못 찾으면 보수적으로 제외한다 (엉뚱한 편 예약 방지)
+  POOL = [makeEl('', '항공편명 KE999 일반석 50,000 마일', { tag: 'LABEL' })];
+  check('운항사 표기가 없으면 고르지 않는다', U.findCabin('일반석') === null);
 }
 
 // ---- hittable: 모달에 가려진 요소를 "누를 수 있다"고 하면 안 된다 ------------------
