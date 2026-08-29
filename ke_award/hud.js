@@ -30,7 +30,19 @@
      *   'departure' - 조회 화면에서 시작. 목표 날짜로 맞춰두고 그 자리에서 새로고침.
      *                 달력 한 장과 그에 딸린 전환이 빠진다 */
     startAt: 'calendar',
-    leadMs: 150,          // 네트워크 지연 보정: 이만큼 먼저 발사
+    /* 이만큼 먼저 발사한다. 새로고침을 걸어두고 화면이 뜨기를 기다리는 시간이므로,
+     * "네트워크 지연 보정" 이 아니라 "페이지가 뜨는 데 걸리는 시간" 을 넣어야 한다.
+     *
+     * 실측(2026-08-29, 달력 모드 3회): 새로고침 시작부터 달력 데이터
+     * (POST ap/booking/avail/calendarFareMatrix)가 오기까지 3.68 / 3.92 / 4.33초.
+     * 그 앞 4초는 GNB·푸터·로그인·설문 같은 부수 호출이고 달력 요청은 맨 끝이다.
+     *
+     * 150 이면 09:00:00 에 새로고침이 시작돼 달력은 09:00:04 에야 온다 - 4초를 그냥
+     * 늦게 출발하는 셈이었다. 3400 이면 08:59:56.6 에 시작해 09:00:00.3~0.9 에 도착한다.
+     * 가장 빨랐던 3.68초보다 작게 잡았으므로 오픈 전에 조회가 나가는 일은 없다
+     * (일찍 나가면 아직 안 열린 날짜를 받아 한 번 더 새로고침해야 한다).
+     * 느려지는 쪽으로 틀리면 지금과 같아질 뿐이라 손해가 없다. */
+    leadMs: 3400,
     pos: null,            // 패널 위치 {left, top}. 사이트 UI 를 가리면 옮길 수 있게
                           // 드래그해서 옮긴 자리를 기억한다
     armed: false
@@ -527,8 +539,12 @@
       toast('녹화된 단계가 없습니다 - 먼저 ● 녹화 하세요', true);
       return;
     }
+    /* "sec 초 뒤 발사" 는 오픈시각이 아니라 실제로 새로고침이 걸리는 시각을 말한다.
+     * 발사는 오픈시각보다 선발사만큼 이르므로, 그만큼 뒤로 밀어 목표를 잡아야
+     * 약속한 시각에 발사된다. (선발사가 3.4초인데 이걸 빼먹으면 '10초 뒤' 가
+     * 6.6초 뒤가 되고, sec 이 선발사보다 작으면 아예 무장조차 안 된다) */
     // 입력칸은 초 단위라 그냥 넣으면 밀리초가 잘려 최대 1초 일찍 발사된다. 초 경계로 올림.
-    S.targetKst = kstInput(Math.ceil((nowSrv() + sec * 1000) / 1000) * 1000);
+    S.targetKst = kstInput(Math.ceil((nowSrv() + sec * 1000 + S.leadMs) / 1000) * 1000);
     S.armed = true;
     save(); render(); schedule();
     toast('연습: ' + sec + '초 뒤 발사합니다');
@@ -673,7 +689,8 @@
       '<div id="ke-clock">--</div><div id="ke-cd">--</div>' +
       '<label><b>발사 시각</b> - 매크로가 움직일 시각 (매일 09:00)</label>' +
       '<input id="ke-target" placeholder="09:00">' +
-      '<label>선발사(ms)</label><input id="ke-lead" type="number">' +
+      '<label>선발사(ms) <span style="color:#999">- 화면이 뜨는 시간. 달력 3400</span></label>' +
+      '<input id="ke-lead" type="number">' +
       '<button id="ke-sync" style="background:#666;width:100%">시각 동기</button>' +
       '<hr style="border:0;border-top:1px solid #ddd;margin:8px 0">' +
       '<label>좌석 등급</label>' +
