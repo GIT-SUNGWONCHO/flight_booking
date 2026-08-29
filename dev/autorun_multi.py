@@ -43,6 +43,9 @@ def main() -> int:
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--skip-setup", action="store_true", help="탭이 이미 서 있으면 준비를 건너뛴다")
     ap.add_argument("--setup-at", default="", help="준비를 시작할 시각 (09:00 / +60s). 생략하면 바로 시작")
+    ap.add_argument("--mode", default="calendar", choices=["calendar", "departure"],
+                    help="calendar=달력에서 시작(검증됨) / departure=조회 화면에서 시작(달력 한 장을 건너뜀)")
+    ap.add_argument("--tag", default="", help="결과 파일 이름에 붙일 꼬리표 (모드별 비교용)")
     a = ap.parse_args()
 
     routes = [r.strip().upper() for r in a.routes.split(",") if r.strip()]
@@ -62,6 +65,8 @@ def main() -> int:
             cmd = [sys.executable, str(ROOT / "dev" / "setup.py"), r, "--tab", str(i)]
             if a.date:
                 cmd += ["--date", a.date]
+            if a.mode == "departure":
+                cmd += ["--departure"]
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             tail = (p.stdout or "").strip().splitlines()
             try: st = json.loads(tail[-1]) if tail else {}
@@ -82,10 +87,11 @@ def main() -> int:
                 try: p.close()
                 except Exception: pass
 
-        tabs = [p for p in ctx.pages if "calendar-fare-bonus" in p.url][:len(routes)]
+        mark = "select-award-flight" if a.mode == "departure" else "calendar-fare-bonus"
+        tabs = [p for p in ctx.pages if mark in p.url][:len(routes)]
         if len(tabs) < len(routes):
             print(json.dumps({"ok": False,
-                              "why": f"달력 탭이 {len(tabs)}개뿐 (노선 {len(routes)}개)"},
+                              "why": f"{a.mode} 탭이 {len(tabs)}개뿐 (노선 {len(routes)}개)"},
                              ensure_ascii=False))
             return 3
 
@@ -94,8 +100,9 @@ def main() -> int:
 
         for i, p in enumerate(tabs):
             p.evaluate(js)
-            p.evaluate("""({cabin, expect, dry}) => {
-              const R = window.KE_REC;
+            p.evaluate("""({cabin, expect, dry, mode}) => {
+              const R = window.KE_REC, H = window.KE_HUD;
+              H.state.startAt = mode;
               R.pause('multi'); R.state.playAfterReload = false;
               R.loadBaked();
               if (dry) R.state.steps = R.state.steps.slice(0, 6);
@@ -104,7 +111,7 @@ def main() -> int:
               R.state.allowPay = !dry;
               R.state.byCause = {}; R.state.problem = false;
               R.reset(); R.save();
-            }""", {"cabin": a.cabin, "expect": a.expect, "dry": a.dry})
+            }""", {"cabin": a.cabin, "expect": a.expect, "dry": a.dry, "mode": a.mode})
             log(f"탭{i} 준비됨 ({routes[i]})")
 
         wait = (fire_at - datetime.now(KST)).total_seconds()
@@ -145,7 +152,7 @@ def main() -> int:
         time.sleep(5)
         pays = [p for _, p in popups if "pay.naver" in p.url or "payment-loading" in p.url]
         report = {"firedAt": fire_at.isoformat(), "routes": routes, "cabin": a.cabin,
-                  "dry": a.dry, "payWindows": len(pays), "results": {}}
+                  "mode": a.mode, "dry": a.dry, "payWindows": len(pays), "results": {}}
         print("\n=== 결과 ===")
         for i, s in enumerate(done):
             ok = bool(s and s["idx"] >= s["n"] and not s["problem"])
@@ -156,7 +163,10 @@ def main() -> int:
         for p in pays: print("   ", p.url[:80])
 
         OUT.mkdir(exist_ok=True)
-        (OUT / "autorun_multi.json").write_text(
+        for i, p in enumerate(tabs):
+            try: p.screenshot(path=str(OUT / f"{a.tag or a.mode}_{routes[i]}.png"))
+            except Exception: pass
+        (OUT / f"autorun_multi_{a.tag or a.mode}.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
         b.close()
     return 0

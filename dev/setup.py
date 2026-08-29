@@ -27,6 +27,10 @@ CAL = "/booking/calendar-fare-bonus"
 def log(m): print(f"  {m}", flush=True)
 
 
+def goal_now(url: str, departure: bool) -> bool:
+    return ("/booking/select-award-flight" in url) if departure else (CAL in url)
+
+
 def main() -> int:
     from playwright.sync_api import sync_playwright
     args = sys.argv[1:]
@@ -40,6 +44,9 @@ def main() -> int:
         i = args.index("--date")
         want_date = args[i + 1]
         del args[i:i + 2]
+    departure = "--departure" in args
+    if departure:
+        args.remove("--departure")
     want = (args[0].upper() if args else "")
 
     with sync_playwright() as pw:
@@ -63,7 +70,7 @@ def main() -> int:
             except Exception: pass
 
         # 이미 달력이면 끝 (도착지를 바꿔야 하면 그대로 진행한다)
-        if CAL in page.url and not want:
+        if goal_now(page.url, departure) and not want:
             inject()
             log(f"이미 달력 화면: {page.url[:60]}")
             print(json.dumps({"ok": True, "url": page.url, "why": "이미 달력"}, ensure_ascii=False))
@@ -121,7 +128,8 @@ def main() -> int:
         # 우리는 달력에서 그날 새로 열린 날짜를 찾아야 하므로 켜야 한다.
         # 토글이라 이미 켜져 있는데 또 누르면 꺼진다 - 실측에서 그 바람에 조회 화면으로
         # 튕겼다. 상태를 보고 꺼져 있을 때만 누른다.
-        flex = page.evaluate("""() => {
+        # 조회 모드는 이 체크박스를 꺼야 검색이 조회 화면으로 간다 (켜면 달력으로 감).
+        flex = page.evaluate("""(wantOn) => {
           const U = window.KE_UTIL;
           /* 체크박스 자체에는 글자가 없다. '가까운 날짜 함께 조회' 라고 쓰인 라벨을 먼저
            * 찾고, 거기서 for=/조상 순으로 실제 input 을 찾아간다. */
@@ -153,10 +161,10 @@ def main() -> int:
             n = n.parentElement;
           }
           if (!box) return 'input못찾음';
-          if (box.checked) return 'already';
+          if (!!box.checked === !!wantOn) return 'already';
           U.fireClick(box);
-          return box.checked ? 'on' : 'clicked(반영안됨)';
-        }""")
+          return box.checked ? 'on' : 'off';
+        }""", not departure)
         log(f"가까운 날짜 함께 조회: {flex}")
         page.wait_for_timeout(1500)
 
@@ -363,16 +371,19 @@ def main() -> int:
           const b = U.candidates(document).filter(e => U.visible(e) && U.label(e) === '항공편 검색');
           if (b.length) U.fireClick(b[b.length-1]);
         }""")
+        DEP = "/booking/select-award-flight"
+        goal = DEP if departure else CAL
         for _ in range(60):
             time.sleep(0.5)
-            if CAL in page.url: break
+            if goal in page.url: break
         page.wait_for_timeout(6000)
         inject()
 
-        ok = CAL in page.url
-        log(("달력 도착: " if ok else "달력 실패: ") + page.url[:70])
+        ok = goal in page.url
+        log((("조회" if departure else "달력") + (" 도착: " if ok else " 실패: ")) + page.url[:70])
         print(json.dumps({"ok": ok, "url": page.url,
-                          "why": "" if ok else "검색이 달력으로 가지 않음"}, ensure_ascii=False))
+                          "why": "" if ok else f"검색이 {'조회' if departure else '달력'} 화면으로 가지 않음"},
+                         ensure_ascii=False))
         return 0 if ok else 3
 
 
