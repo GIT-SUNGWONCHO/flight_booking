@@ -321,10 +321,27 @@ def main() -> int:
                   U.fireClick(hit);
                   return U.label(hit).replace(/\\s+/g,' ').slice(0,30);
                 }""", {"dy": str(int(dy)), "head": head})
-                log(f"  목표일 선택: {got or '그 달에 그 날이 없음'}")
+                # 그 날이 아직 안 열렸을 수 있다 (09:00 에 열리는 날을 08:50 에 세울 때가
+                # 그렇다). 여기서 필요한 것은 "달력이 그 달을 보여주는 것" 뿐이므로,
+                # 같은 달의 고를 수 있는 마지막 날로 대신한다.
+                if not got:
+                    got = page.evaluate("""() => {
+                      const U = window.KE_UTIL;
+                      const tds = U.candidates(document).filter(e => U.visible(e)
+                        && /ui-datepicker__td/.test((e.className||'').toString())
+                        && /-available/.test((e.className||'').toString()));
+                      if (!tds.length) return null;
+                      const t = tds[tds.length - 1];
+                      U.fireClick(t);
+                      return U.label(t).replace(/\\s+/g,' ').slice(0,30);
+                    }""")
+                    log(f"  목표일이 아직 없어 그 달 마지막 날로 대신: {got or '가능한 날 없음'}")
+                else:
+                    log(f"  목표일 선택: {got}")
                 if not got:
                     print(json.dumps({"ok": False, "url": page.url,
-                                      "why": f"달력에서 {want_date} 를 못 고름"}, ensure_ascii=False))
+                                      "why": f"달력에서 {want_date} 달의 날짜를 못 고름"},
+                                     ensure_ascii=False))
                     return 7
             else:
                 got = page.evaluate("""() => {
