@@ -81,11 +81,65 @@ def main() -> int:
         page.wait_for_timeout(11000)
         inject()
 
-        # 로그인 확인 (헤더가 shadow DOM 안이라 candidates 로 봐야 한다)
-        logged = page.evaluate("""() => {
-          const U = window.KE_UTIL;
-          return U.candidates(document).some(e => U.visible(e) && /로그아웃/.test(U.label(e)));
-        }""")
+        # 로그인 확인. 헤더가 shadow DOM 안이고 늦게 그려져서, 한 번만 보고 판단하면
+        # 멀쩡히 로그인돼 있는데도 '로그인 필요' 로 읽는다 (실측 2026-08-30 01:25:
+        # 같은 세션을 두 번 봤는데 한 번은 로그아웃, 한 번은 로그인으로 나왔다).
+        # 09:00 에 이걸로 중단되면 전부 헛일이므로, 나타날 때까지 기다렸다 판단한다.
+        logged = False
+        for _ in range(25):
+            st = page.evaluate("""() => {
+              const U = window.KE_UTIL;
+              const c = U.candidates(document).filter(e => U.visible(e));
+              return {out: c.some(e => /로그아웃/.test(U.label(e))),
+                      inb: c.some(e => /^로그인$/.test(U.label(e)))};
+            }""")
+            if st["out"]:
+                logged = True
+                break
+            page.wait_for_timeout(1000)
+            inject()
+        if not logged:
+            # 세션이 만료됐으면 네이버 연동으로 다시 들어간다. 네이버 쪽 세션이 살아
+            # 있으면 버튼 두 번으로 끝난다 - 비밀번호를 치는 게 아니다.
+            # 비밀번호 입력칸이 뜨면 거기서 멈춘다. 그건 사람이 해야 한다.
+            log("로그아웃 상태 - 네이버 연동으로 다시 로그인 시도")
+            page.evaluate("""() => {
+              const U = window.KE_UTIL;
+              const b = U.candidates(document).find(e => U.visible(e) && /^로그인$/.test(U.label(e)));
+              if (b) U.fireClick(b);
+            }""")
+            page.wait_for_timeout(6000)
+            inject()
+            page.evaluate("""() => {
+              const U = window.KE_UTIL;
+              const b = U.candidates(document).find(e => U.visible(e) && /네이버|NAVER/i.test(U.label(e)));
+              if (b) U.fireClick(b);
+            }""")
+            for _ in range(16):
+                page.wait_for_timeout(2500)
+                try:
+                    # 대한항공 /login 페이지에도 자체 아이디·비밀번호 칸이 있다.
+                    # 그걸 보고 멈추면 네이버로 넘어가기도 전에 포기한다 (실측:
+                    # 그래서 자동 로그인이 실패했다). 네이버 화면에서 물을 때만 멈춘다.
+                    if "naver" in page.url and page.evaluate("""() => {
+                      const es = document.querySelectorAll('input[type=password]');
+                      for (const e of es) { const r = e.getBoundingClientRect();
+                        if (r.width > 1 && r.height > 1) return true; }
+                      return false;
+                    }"""):
+                        log("네이버가 비밀번호를 요구합니다 - 사람이 로그인해야 함")
+                        break
+                    if "koreanair" in page.url:
+                        inject()
+                        if page.evaluate("""() => {
+                          const U = window.KE_UTIL;
+                          return U.candidates(document).some(e => U.visible(e) && /로그아웃/.test(U.label(e)));
+                        }"""):
+                            logged = True
+                            log("네이버 연동 로그인 성공")
+                            break
+                except Exception:
+                    pass
         if not logged:
             log("로그인 안 됨")
             print(json.dumps({"ok": False, "url": page.url, "why": "로그인 필요"}, ensure_ascii=False))
@@ -262,10 +316,15 @@ def main() -> int:
         # 출발일. 아무 날짜나 고르면 안 된다 - 달력 화면은 고른 날 언저리를 보여주므로,
         # 2026년 9월을 고르면 2027년 8월 달력이 아니라 2026년 9월 달력이 뜬다.
         # 목표일이 있으면 그 달까지 이동해서 그 날을 고른다.
+        # 날짜 버튼 클래스에 -small / -large 가 창 크기에 따라 다르게 붙는다.
+        # 크기에 기대면 어떤 창에서는 아예 못 찾는다 (실측: -small 로만 찾다가
+        # -large 로 렌더된 창에서 날짜를 못 골라 준비가 통째로 실패했다).
+        # 크기 표시는 무시하고 '출발일' 이라고 쓰인 버튼을 찾는다.
         DATEBTN = """() => {
           const U = window.KE_UTIL;
           const d = U.candidates(document).find(e => U.visible(e)
-            && /ui-booking-tool__button -small/.test((e.className||'').toString()));
+            && /ui-booking-tool__button/.test((e.className||'').toString())
+            && /^출발일/.test(U.label(e)));
           return d ? U.label(d).replace(/\\s+/g,' ').slice(0,34) : null;
         }"""
         cur = page.evaluate(DATEBTN)
@@ -275,7 +334,8 @@ def main() -> int:
             page.evaluate("""() => {
               const U = window.KE_UTIL;
               const d = U.candidates(document).find(e => U.visible(e)
-                && /ui-booking-tool__button -small/.test((e.className||'').toString()));
+                && /ui-booking-tool__button/.test((e.className||'').toString())
+                && /^출발일/.test(U.label(e)));
               if (d) U.fireClick(d);
             }""")
             page.wait_for_timeout(2500)
