@@ -59,9 +59,13 @@ def ensure_browser() -> bool:
         if attempt == 0:
             log("브라우저가 없어 새로 띄운다")
             try:
-                subprocess.Popen(["bash", str(ROOT / "dev-browser.sh")],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 start_new_session=True)
+                if sys.platform == "win32":
+                    subprocess.Popen(["cmd", "/c", str(ROOT / "dev-browser.cmd")],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    subprocess.Popen(["bash", str(ROOT / "dev-browser.sh")],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     start_new_session=True)
             except Exception as e:
                 log(f"띄우기 실패: {e}")
                 return False
