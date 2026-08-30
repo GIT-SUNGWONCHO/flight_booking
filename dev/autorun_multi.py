@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 USER = ROOT / "userscript" / "ke-award-macro.user.js"
-OUT = ROOT / ".dev-shots"
+OUT = ROOT / "dev-shots"
 CDP = "http://localhost:9222"
 KST = timezone(timedelta(hours=9))
 

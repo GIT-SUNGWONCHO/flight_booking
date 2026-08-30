@@ -5,7 +5,7 @@
 #   - 미결제 주문을 8건(4노선 x 2모드) 만들지 않는다
 set -u
 cd "$(dirname "$0")/.."
-SC="${1:-.dev-shots}"
+SC="${1:-dev-shots}"
 mkdir -p "$SC"
 ROUTES=ZRH,CDG,FCO,MXP
 DATE=2027-08-25

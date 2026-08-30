@@ -16,7 +16,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
 USERSCRIPT = ROOT / "userscript" / "ke-award-macro.user.js"
-SHOTS = ROOT / ".dev-shots"
+SHOTS = ROOT / "dev-shots"
 
 
 def get_page(pw):

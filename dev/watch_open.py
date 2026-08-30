@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / ".dev-shots"
+OUT = ROOT / "dev-shots"
 CDP = "http://localhost:9222"
 KST = timezone(timedelta(hours=9))
 
@@ -154,7 +154,7 @@ def main() -> int:
             {"day": a.day, "route": a.route,
              "openedAt": opened_at.isoformat() if opened_at else None,
              "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
-        log(f"기록 {len(rows)}건 -> .dev-shots/watch_open.json")
+        log(f"기록 {len(rows)}건 -> dev-shots/watch_open.json")
         b.close()
     return 0
 
