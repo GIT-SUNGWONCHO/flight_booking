@@ -42,8 +42,11 @@
      카드도 없다 - "등급이 없다" 가 아니라 "아직 안 떴다" 인 상태다. 이걸 구분 못 해
      무한 새로고침만 하던 사고를 재현한다. */
   var drawAfter = +(new URLSearchParams(location.search).get('drawAfter') || 0);
+  /* soldout=1: 그 날짜는 열렸고 화면도 떴는데(조회 응답은 온다) 프레스티지만 매진이다.
+     클릭할 좌석 버튼이 없고, 서버 응답이 KEBONUSPR.soldout:true 로 말한다. */
+  var soldOut = new URLSearchParams(location.search).get('soldout') === '1';
   function drawSeat() {
-    if (!out) return;
+    if (!out || soldOut) return;
     /* 실제 화면은 편마다 "대한항공 운항" / "에어프랑스 운항" 표기를 달고, 운임 카드는
        그 블록 안에 들어 있다. findCabin 은 코드셰어를 거르려고 이 표기를 보므로
        픽스처도 같은 구조여야 한다. */
@@ -102,7 +105,7 @@
   function ask() {
     var x = new XMLHttpRequest();
     x.open("GET", "/booking/select-award-flight/awardAvailability.json?d=" + day
-                  + "&seats=" + (out ? '1' : '0'));
+                  + "&seats=" + (out ? '1' : '0') + (soldOut ? '&so=1' : ''));
     x.send();
   }
   if (drawAfter) setTimeout(ask, drawAfter); else ask();

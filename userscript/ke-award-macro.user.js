@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.43.0-dirty
+// @version      1.52.0-dirty
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -751,7 +751,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.43.0-dirty', hash: '3aeb514-dirty' };
+  var B = { version: '1.52.0-dirty', hash: '299eddd-dirty' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -994,9 +994,69 @@ try {
     }).join(' · ');
   }
 
+  var CABIN_FAMILY = { '프레스티지': 'KEBONUSPR', '일반석': 'KEBONUSEY',
+                       '일등석': 'KEBONUSFC', '프리미엄석': 'KEBONUSPY' };
+
+  /* 고른 등급(예: '프레스티지')이 대한항공 운항편에서 매진인지 서버 응답으로 판정한다.
+   *
+   * 화면에는 "매진" 글자뿐이라 "아직 안 열림" 과 구분이 안 된다. 서버는 명확하다:
+   * commercialFareFamilyList 의 KEBONUSPR 이 soldout:true 면 팔린 것이다.
+   *
+   * 코드셰어(에어프랑스 운항 KE5901 등)는 제외한다 - 우리는 대한항공만 탄다.
+   * 날짜(mmdd, 예 "08-27")를 주면 그 날 응답만 본다. 낡은 다른 날 응답에 속지 않게.
+   *
+   * 반환: null(응답 없음) 또는
+   *   {answered, listed, soldout, seats, eySeats, keFlights}
+   *   listed=대한항공편에 그 등급이 목록에 있었나, soldout=있으면서 전부 매진인가,
+   *   eySeats=같은 판단 대상에서 일반석 최대 좌석수(안내 문구용). */
+  function keCabin(cabinName, mmdd) {
+    var fam = CABIN_FAMILY[cabinName] || cabinName;
+    var want = mmdd ? String(mmdd).replace(/[^0-9]/g, '') : '';   // "08-27" -> "0827"
+    var res = null;
+    /* 가장 최근 응답부터(뒤에서 앞으로) 훑어, 그 날짜를 담은 응답 하나를 쓴다. */
+    for (var i = hits.length - 1; i >= 0 && !res; i--) {
+      if (!/availab/i.test(hits[i].url)) continue;
+      var d; try { d = JSON.parse(hits[i].body); } catch (e) { continue; }
+      var bounds = (d && d.upsellBoundAvailList) || [];
+      var listed = false, openSeats = 0, soldCount = 0, keCount = 0, ey = 0, dateSeen = false;
+      bounds.forEach(function (b) {
+        ((b && b.availFlightList) || []).forEach(function (f) {
+          var info = (f.flightInfoList && f.flightInfoList[0]) || {};
+          var isKE = info.operationCarrierCode === 'KE' && !info.codeShare;
+          var md = String(f.departureDate || '').slice(4, 8);
+          if (want && md !== want) return;         // 다른 날짜편은 건너뛴다
+          dateSeen = true;
+          if (!isKE) return;                        // 코드셰어(외항사 운항) 제외
+          keCount++;
+          ((f.commercialFareFamilyList) || []).forEach(function (c) {
+            if (c.fareFamily === fam) {
+              listed = true;
+              if (c.soldout) soldCount++;
+              else openSeats = Math.max(openSeats, parseInt(c.seatCount, 10) || 0);
+            }
+            if (c.fareFamily === 'KEBONUSEY' && !c.soldout) {
+              ey = Math.max(ey, parseInt(c.seatCount, 10) || 0);
+            }
+          });
+        });
+      });
+      if (!dateSeen && want) continue;              // 이 응답엔 그 날짜가 없다 - 더 옛 응답을 본다
+      res = {
+        answered: true,
+        keFlights: keCount,
+        listed: listed,
+        soldout: listed && openSeats === 0 && soldCount > 0,
+        seats: openSeats,
+        eySeats: ey
+      };
+    }
+    return res;
+  }
+
   W.KE_PROBE = {
     hits: function () { return hits; },
     stamp: function () { return stamp; },
+    keCabin: keCabin,
     /* 좌석 조회 응답이 한 번이라도 왔는가.
      *
      * "고른 등급이 없다" 와 "페이지가 아직 안 떴다" 를 가르는 근거다. 화면만 보면
@@ -1166,8 +1226,14 @@ try {
                           // 추측하지 않고 재기 위한 것 - 페이지 이동을 넘어 유지된다
     stepStartedAt: 0,     // 지금 단계를 시작한 시각
     openWaitSince: 0,     // 목표 날짜가 열리기를 기다리기 시작한 시각(페이지 이동을 넘어 유지)
+    soldOutSince: 0,      // 고른 등급이 '매진 확정' 으로 처음 보인 시각(페이지 이동을 넘어 유지)
+    openReloads: 0,       // 날짜/좌석을 기다리며 새로고침한 횟수 (발사가 일렀는지 계측)
     openRetryMs: 1200,    // 목표 날짜가 없을 때 새로고침 간격 (서버 부담 하한)
     openWaitMaxMs: 180000,// 이만큼 기다려도 안 열리면 사람을 부른다
+    /* 좌석이 매진(soldout:true)으로 확정돼도 몇 백ms 늦게 풀릴 수 있어 이만큼은
+     * 다시 불러본다. 그동안 계속 매진이면 멈춘다. 예전엔 openWaitMaxMs(180초)를
+     * 다 채워 3분을 헛돌았다 - 매진이면 사람이 바로 다음 수를 둬야 한다. */
+    soldOutGraceMs: 4000,
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
     optionalMs: 400,      // optional 단계 대기 (주 수단은 onlyIfPrev - 대기가 없다)
     gapMs: 80,            // 클릭 사이 최소 간격
@@ -1225,7 +1291,7 @@ try {
    * 기본값이 바뀌면 지문(tuneSig)이 달라지고, 그때 저장된 값을 새 기본값으로
    * 덮는다. 지문이 같으면 손대지 않으므로, 시험하려고 잠깐 바꿔둔 값은 유지된다. */
   var TUNING = ['stepTimeoutMs', 'optionalMs', 'gapMs', 'settleMs', 'maxSettleMs',
-                'retryClickMs', 'openRetryMs', 'openWaitMaxMs'];
+                'retryClickMs', 'openRetryMs', 'openWaitMaxMs', 'soldOutGraceMs'];
 
   function tuneSig() {
     var out = '';
@@ -1365,10 +1431,13 @@ try {
     /* 전체 합계. 느린 단계 3개만으로는 "우리가 기다린 시간" 이 전체에서 얼마인지
      * 알 수 없다. 줄일 여지가 있는 쪽이 어디인지 이 줄 하나로 보인다. */
     var c = S.byCause || {}, keys = Object.keys(c).sort(function (x, y) { return c[y] - c[x]; });
-    if (!keys.length) return slow;
+    /* 발사가 일러서(선발사 과다) 날짜/좌석이 아직 없어 다시 불러왔다면 그 횟수를 붙인다.
+     * 한 번이 약 3~4초라, 이게 0 이 아니면 선발사를 줄여야 한다는 직접적 신호다. */
+    var re = S.openReloads ? '  ·  재고침 ' + S.openReloads + '회(발사 이름)' : '';
+    if (!keys.length) return slow + re;
     return slow + '  |  전체: ' + keys.map(function (k) {
       return k + ' ' + (c[k] / 1000).toFixed(1) + 's';
-    }).join(', ');
+    }).join(', ') + re;
   }
 
   function log(msg) {
@@ -1624,6 +1693,8 @@ try {
    * 지우는 곳을 하나로 둔다. 새 상태를 추가할 때도 여기만 고치면 둘이 같이 간다. */
   function resetRunState() {
     S.openWaitSince = 0;
+    S.soldOutSince = 0;
+    S.openReloads = 0;
     S.endedAt = 0;
     S.problem = false;
     S.fixSince = 0; S.fixPhase = 0; S.fixClickAt = 0; S.fixOpens = 0;
@@ -2110,6 +2181,7 @@ try {
       }
       if (now - lastOpenReloadAt < S.openRetryMs) return;
       lastOpenReloadAt = now;
+      S.openReloads = (S.openReloads || 0) + 1;
       S.idx = 0;
       save();
       log('목표 날짜(' + S.expectDate + ')가 아직 달력에 없습니다 - 새로고침하고 다시 봅니다');
@@ -2153,6 +2225,26 @@ try {
       if (step.dynamicCabin && U.onDeparture() && waitedMs > S.retryClickMs
           && (answered || U.cabinListReady())) {
         if (!S.openWaitSince) S.openWaitSince = now;
+        /* 서버가 '이 등급 매진(soldout:true)' 이라고 명확히 말하면, 계속 새로고침해봐야
+         * 좌석은 다시 안 판다. 다만 09:00 정각엔 몇 백ms 늦게 풀리는 경우가 있어
+         * soldOutGraceMs 만큼은 지켜보고, 그동안 계속 매진이면 즉시 멈춘다.
+         * (예전엔 openWaitMaxMs 180초를 다 채워 3분을 헛돌았다.) */
+        var so = null;
+        try {
+          var P3 = W.KE_PROBE || window.KE_PROBE;
+          if (P3 && P3.keCabin) so = P3.keCabin(S.cabin, S.expectDate || S.fixDate);
+        } catch (e) {}
+        if (so && so.soldout) {
+          if (!S.soldOutSince) S.soldOutSince = now;
+          if (now - S.soldOutSince > S.soldOutGraceMs) {
+            finish('"' + S.cabin + '" 매진'
+                   + (so.eySeats ? ' (일반석 ' + so.eySeats + '석 남음)' : '')
+                   + ' - ' + secs(elapsed()) + ' 지점, 재고침 ' + (S.openReloads || 0) + '회', true);
+            return;
+          }
+        } else if (S.soldOutSince) {
+          S.soldOutSince = 0;   // 다시 열렸다(좌석이 돌아옴) - 매진 판정 취소
+        }
         if (now - S.openWaitSince > S.openWaitMaxMs) {
           finish('"' + S.cabin + '" 좌석이 ' + Math.round(S.openWaitMaxMs / 1000)
                  + '초 동안 안 나왔습니다 - 화면을 확인하세요', true);
@@ -2160,6 +2252,7 @@ try {
         }
         if (now - lastOpenReloadAt < S.openRetryMs) return;
         lastOpenReloadAt = now;
+        S.openReloads = (S.openReloads || 0) + 1;
         save();
         log('조회 결과에 "' + S.cabin + '" 이(가) 없습니다 - 새로고침하고 다시 봅니다 ('
             + Math.round((now - S.openWaitSince) / 1000) + '초째)');
@@ -2620,11 +2713,14 @@ try {
      * 그 앞 4초는 GNB·푸터·로그인·설문 같은 부수 호출이고 달력 요청은 맨 끝이다.
      *
      * 150 이면 09:00:00 에 새로고침이 시작돼 달력은 09:00:04 에야 온다 - 4초를 그냥
-     * 늦게 출발하는 셈이었다. 3400 이면 08:59:56.6 에 시작해 09:00:00.3~0.9 에 도착한다.
-     * 가장 빨랐던 3.68초보다 작게 잡았으므로 오픈 전에 조회가 나가는 일은 없다
-     * (일찍 나가면 아직 안 열린 날짜를 받아 한 번 더 새로고침해야 한다).
-     * 느려지는 쪽으로 틀리면 지금과 같아질 뿐이라 손해가 없다. */
-    leadMs: 3400,
+     * 늦게 출발하는 셈이었다.
+     *
+     * 3400 은 09:00:00.3~0.9 도착을 노렸는데, 실전(2026-09-01)에서 오버헤드가
+     * 그날따라 짧았는지 조회가 오픈 직전에 나가 빈 날짜를 받고 한 번 더 새로고침했다
+     * (약 3.4초 손해). 그래서 2500 으로 늦춘다: 08:59:57.5 출발 -> 09:00:01.2~1.8
+     * 도착. 착지가 1초쯤 늦어도, 오픈 뒤라 재고침이 없어 실질적으로 더 빠르고 안정적이다.
+     * 재고침이 났는지는 완료 리포트의 '재고침 N회' 로 확인한다. */
+    leadMs: 2500,
     pos: null,            // 패널 위치 {left, top}. 사이트 UI 를 가리면 옮길 수 있게
                           // 드래그해서 옮긴 자리를 기억한다
     armed: false

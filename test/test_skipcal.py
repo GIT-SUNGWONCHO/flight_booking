@@ -41,19 +41,39 @@ DEP = HOST + "/booking/select-award-flight/departure"
 MIME = {".html": "text/html", ".json": "application/json"}
 
 
-def availability(day: str, seats: bool) -> str:
-    """조회 화면이 좌석을 그릴 때 쓰는 응답. 실측(2026-08-27) 모양 그대로.
+def availability(day: str, seats: bool, soldout: bool = False) -> str:
+    """조회 화면이 좌석을 그릴 때 쓰는 응답. 실측(2026-09-01) 모양 그대로.
 
     좌석이 아직 안 열린 날이면 availFlightList 가 비어 서버 응답에서 날짜를 알 수
-    없다 - 그때는 검색 위젯만이 근거가 된다. 그 상황을 그대로 재현해야 의미가 있다."""
+    없다 - 그때는 검색 위젯만이 근거가 된다. 그 상황을 그대로 재현해야 의미가 있다.
+
+    soldout=True 는 '날짜는 열렸고 응답도 오는데 프레스티지만 매진' 인 경우다
+    (실전 2026-09-01 CDG). KEBONUSPR.soldout:true, 일반석은 남아 있다.
+    운항사 필드(operationCarrierCode/codeShare)를 넣어야 매진 판정이 코드셰어를
+    걸러낼 수 있다 - keCabin 이 대한항공 운항편만 본다."""
     strip = [f"202708{d:02d}" for d in range(18, 25)]
-    flights = [{
-        "flightId": "0", "departureDate": day + "132000",
-        "flightInfoList": [{"carrierCode": "KE", "flightNumber": "931"}],
-        "commercialFareFamilyList": [
-            {"fareFamily": "KEBONUSPR", "seatCount": "1", "soldout": False,
-             "totalMileage": "62500"}],
-    }] if seats else []
+    KE = {"carrierCode": "KE", "flightNumber": "931",
+          "operationCarrierCode": "KE", "codeShare": False}
+    if soldout:
+        flights = [{
+            "flightId": "0", "departureDate": day + "132000",
+            "flightInfoList": [KE],
+            "commercialFareFamilyList": [
+                {"fareFamily": "KEBONUSEY", "seatCount": "9", "soldout": False,
+                 "totalMileage": "35000"},
+                {"fareFamily": "KEBONUSPR", "seatCount": "0", "soldout": True,
+                 "totalMileage": "62500"}],
+        }]
+    elif seats:
+        flights = [{
+            "flightId": "0", "departureDate": day + "132000",
+            "flightInfoList": [KE],
+            "commercialFareFamilyList": [
+                {"fareFamily": "KEBONUSPR", "seatCount": "1", "soldout": False,
+                 "totalMileage": "62500"}],
+        }]
+    else:
+        flights = []
     return json.dumps({"upsellBoundAvailList": [{
         "boundId": "0",
         "upsellCalendarFareList": [{"date": d} for d in strip],
@@ -69,7 +89,8 @@ def serve(route):
         # 날짜와 좌석 유무는 요청에 따라 만들어 준다. 고정 파일로 두면 화면이 보는
         # 날짜와 응답의 날짜가 어긋나 매크로가(옳게) 거부해버린다.
         route.fulfill(status=200, content_type="application/json",
-                      body=availability(q.get("d", "20270821"), q.get("seats") == "1"))
+                      body=availability(q.get("d", "20270821"), q.get("seats") == "1",
+                                        q.get("so") == "1"))
         return
     f = FX.parent / path.lstrip("/")
     if f.is_dir() or not f.suffix:
@@ -250,6 +271,31 @@ def main() -> int:
                   "무한히 새로고침하지 않고 사람을 부른다", msg)
             print(f"      {msg}")
             pg.evaluate("() => { KE_REC.state.openWaitMaxMs = 180000; KE_REC.save(); }")
+
+            # ---------- 프레스티지 매진: 180초 헛돌지 말고 바로 멈춘다 ----------
+            # 실전(2026-09-01 CDG): 좌석 등급 화면까지 갔는데 프레스티지가 매진이라,
+            # 예전엔 '아직 안 열렸나' 하고 180초를 새로고침만 돌았다. 이제 서버가
+            # soldout:true 로 말하면 짧게(soldOutGraceMs) 지켜보고 즉시 멈춘다.
+            land(DEP + "?depDate=20270822&soldout=1", fresh_loads=True)
+            setup("08-22")
+            pg.evaluate("() => { KE_REC.state.soldOutGraceMs = 1200;"
+                        " KE_REC.state.openWaitMaxMs = 60000; KE_REC.save(); }")
+            check(pg.evaluate("!document.getElementById('seat')"),
+                  "매진이라 누를 좌석 버튼이 없다 (상황 재현)")
+            pg.evaluate("() => KE_HUD.fire('매진 테스트')")
+            pg.wait_for_function(
+                "() => window.KE_REC && !window.KE_REC.state.playing"
+                " && /매진/.test(window.KE_REC.state.message || '')", timeout=30000)
+            msg = pg.evaluate("KE_REC.state.message")
+            check("매진" in (msg or ""), "프레스티지 매진이면 '매진' 이라고 멈춘다", msg)
+            check("일반석 9석" in (msg or ""), "남은 일반석 수를 함께 알려준다", msg)
+            check("next" not in (pg.evaluate("window.__clicks || []")),
+                  "매진이면 다음 단계로 넘어가지 않는다 (오클릭 없음)",
+                  str(pg.evaluate("window.__clicks || []")))
+            check(pg.evaluate("window.__loads") < 40,
+                  "180초 헛돌지 않고 몇 번 만에 멈춘다 (재고침 폭주 없음)",
+                  str(pg.evaluate("window.__loads")))
+            print(f"      {msg}")
 
             # ---------- 날짜 띠에서 목표 날짜 찾기 ----------
             # 실측(2026-08-28): #flexible-date > li > button.flexible-date__link,

@@ -230,9 +230,69 @@
     }).join(' · ');
   }
 
+  var CABIN_FAMILY = { '프레스티지': 'KEBONUSPR', '일반석': 'KEBONUSEY',
+                       '일등석': 'KEBONUSFC', '프리미엄석': 'KEBONUSPY' };
+
+  /* 고른 등급(예: '프레스티지')이 대한항공 운항편에서 매진인지 서버 응답으로 판정한다.
+   *
+   * 화면에는 "매진" 글자뿐이라 "아직 안 열림" 과 구분이 안 된다. 서버는 명확하다:
+   * commercialFareFamilyList 의 KEBONUSPR 이 soldout:true 면 팔린 것이다.
+   *
+   * 코드셰어(에어프랑스 운항 KE5901 등)는 제외한다 - 우리는 대한항공만 탄다.
+   * 날짜(mmdd, 예 "08-27")를 주면 그 날 응답만 본다. 낡은 다른 날 응답에 속지 않게.
+   *
+   * 반환: null(응답 없음) 또는
+   *   {answered, listed, soldout, seats, eySeats, keFlights}
+   *   listed=대한항공편에 그 등급이 목록에 있었나, soldout=있으면서 전부 매진인가,
+   *   eySeats=같은 판단 대상에서 일반석 최대 좌석수(안내 문구용). */
+  function keCabin(cabinName, mmdd) {
+    var fam = CABIN_FAMILY[cabinName] || cabinName;
+    var want = mmdd ? String(mmdd).replace(/[^0-9]/g, '') : '';   // "08-27" -> "0827"
+    var res = null;
+    /* 가장 최근 응답부터(뒤에서 앞으로) 훑어, 그 날짜를 담은 응답 하나를 쓴다. */
+    for (var i = hits.length - 1; i >= 0 && !res; i--) {
+      if (!/availab/i.test(hits[i].url)) continue;
+      var d; try { d = JSON.parse(hits[i].body); } catch (e) { continue; }
+      var bounds = (d && d.upsellBoundAvailList) || [];
+      var listed = false, openSeats = 0, soldCount = 0, keCount = 0, ey = 0, dateSeen = false;
+      bounds.forEach(function (b) {
+        ((b && b.availFlightList) || []).forEach(function (f) {
+          var info = (f.flightInfoList && f.flightInfoList[0]) || {};
+          var isKE = info.operationCarrierCode === 'KE' && !info.codeShare;
+          var md = String(f.departureDate || '').slice(4, 8);
+          if (want && md !== want) return;         // 다른 날짜편은 건너뛴다
+          dateSeen = true;
+          if (!isKE) return;                        // 코드셰어(외항사 운항) 제외
+          keCount++;
+          ((f.commercialFareFamilyList) || []).forEach(function (c) {
+            if (c.fareFamily === fam) {
+              listed = true;
+              if (c.soldout) soldCount++;
+              else openSeats = Math.max(openSeats, parseInt(c.seatCount, 10) || 0);
+            }
+            if (c.fareFamily === 'KEBONUSEY' && !c.soldout) {
+              ey = Math.max(ey, parseInt(c.seatCount, 10) || 0);
+            }
+          });
+        });
+      });
+      if (!dateSeen && want) continue;              // 이 응답엔 그 날짜가 없다 - 더 옛 응답을 본다
+      res = {
+        answered: true,
+        keFlights: keCount,
+        listed: listed,
+        soldout: listed && openSeats === 0 && soldCount > 0,
+        seats: openSeats,
+        eySeats: ey
+      };
+    }
+    return res;
+  }
+
   W.KE_PROBE = {
     hits: function () { return hits; },
     stamp: function () { return stamp; },
+    keCabin: keCabin,
     /* 좌석 조회 응답이 한 번이라도 왔는가.
      *
      * "고른 등급이 없다" 와 "페이지가 아직 안 떴다" 를 가르는 근거다. 화면만 보면

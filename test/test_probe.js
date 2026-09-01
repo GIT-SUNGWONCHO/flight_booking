@@ -113,6 +113,36 @@ served.set(LOGIN, JSON.stringify({ token: 'SECRET-DO-NOT-KEEP', name: 'CHO' }));
   check(P.dump().startsWith('== 등급별 좌석 수 =='),
         '내보내기 맨 위에 표가 먼저 온다', P.dump().slice(0, 40));
 
+  // ---- keCabin: 대한항공 운항편 기준 매진 판정 (2026-09-01 실전 모양) ----
+  // KE901(대한항공 운항)은 프레스티지 매진·일반석 9석, KE5901(에어프랑스 운항 코드셰어)은 전부 매진.
+  // (clear 하지 않는다 - 뒤의 결제수단 테스트가 쓰는 응답을 지우면 안 된다. 날짜(0827)로 최신 응답을 고른다.)
+  const RACE = 'https://www.koreanair.com/api/ap/booking/avail/awardAvailability?t=race';
+  served.set(RACE, JSON.stringify({ upsellBoundAvailList: [{ availFlightList: [
+    { departureDate: '20270827112000',
+      flightInfoList: [{ carrierCode: 'KE', flightNumber: '901', operationCarrierCode: 'KE', codeShare: false }],
+      commercialFareFamilyList: [
+        { fareFamily: 'KEBONUSEY', seatCount: '9', soldout: false },
+        { fareFamily: 'KEBONUSPR', seatCount: '0', soldout: true },
+        { fareFamily: 'KEBONUSFC', seatCount: '0', soldout: true }] },
+    { departureDate: '20270827114000',
+      flightInfoList: [{ carrierCode: 'KE', flightNumber: '5901', operationCarrierCode: 'AF', codeShare: true }],
+      commercialFareFamilyList: [
+        { fareFamily: 'KEBONUSEY', seatCount: '0', soldout: true },
+        { fareFamily: 'KEBONUSPR', seatCount: '0', soldout: true }] },
+  ] }] }));
+  await global.fetch(RACE);
+  await new Promise((r) => setTimeout(r, 30));
+
+  const prc = P.keCabin('프레스티지', '08-27');
+  check(prc && prc.soldout === true, '대한항공 프레스티지 매진을 판정한다', JSON.stringify(prc));
+  check(prc && prc.eySeats === 9, '안내용 일반석 좌석수를 함께 준다', JSON.stringify(prc));
+  check(prc && prc.keFlights === 1, '코드셰어(KE5901/에어프랑스)는 대한항공으로 세지 않는다', JSON.stringify(prc));
+  const eyc = P.keCabin('일반석', '08-27');
+  check(eyc && eyc.soldout === false && eyc.seats === 9,
+        '일반석은 9석이라 매진으로 보지 않는다', JSON.stringify(eyc));
+  check(P.keCabin('프레스티지', '08-28') === null,
+        '응답에 없는 날짜는 매진이라 단정하지 않는다(null)', JSON.stringify(P.keCabin('프레스티지', '08-28')));
+
   const pt = P.payTypes();
   check(Array.isArray(pt) && pt.includes('NAVERPAY'),
         '쓸 수 있는 결제 수단을 목록으로 읽는다 (네이버페이 있음)', JSON.stringify(pt));

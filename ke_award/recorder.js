@@ -87,8 +87,14 @@
                           // 추측하지 않고 재기 위한 것 - 페이지 이동을 넘어 유지된다
     stepStartedAt: 0,     // 지금 단계를 시작한 시각
     openWaitSince: 0,     // 목표 날짜가 열리기를 기다리기 시작한 시각(페이지 이동을 넘어 유지)
+    soldOutSince: 0,      // 고른 등급이 '매진 확정' 으로 처음 보인 시각(페이지 이동을 넘어 유지)
+    openReloads: 0,       // 날짜/좌석을 기다리며 새로고침한 횟수 (발사가 일렀는지 계측)
     openRetryMs: 1200,    // 목표 날짜가 없을 때 새로고침 간격 (서버 부담 하한)
     openWaitMaxMs: 180000,// 이만큼 기다려도 안 열리면 사람을 부른다
+    /* 좌석이 매진(soldout:true)으로 확정돼도 몇 백ms 늦게 풀릴 수 있어 이만큼은
+     * 다시 불러본다. 그동안 계속 매진이면 멈춘다. 예전엔 openWaitMaxMs(180초)를
+     * 다 채워 3분을 헛돌았다 - 매진이면 사람이 바로 다음 수를 둬야 한다. */
+    soldOutGraceMs: 4000,
     stepTimeoutMs: 20000, // 한 단계에서 요소를 못 찾고 버티는 한계
     optionalMs: 400,      // optional 단계 대기 (주 수단은 onlyIfPrev - 대기가 없다)
     gapMs: 80,            // 클릭 사이 최소 간격
@@ -146,7 +152,7 @@
    * 기본값이 바뀌면 지문(tuneSig)이 달라지고, 그때 저장된 값을 새 기본값으로
    * 덮는다. 지문이 같으면 손대지 않으므로, 시험하려고 잠깐 바꿔둔 값은 유지된다. */
   var TUNING = ['stepTimeoutMs', 'optionalMs', 'gapMs', 'settleMs', 'maxSettleMs',
-                'retryClickMs', 'openRetryMs', 'openWaitMaxMs'];
+                'retryClickMs', 'openRetryMs', 'openWaitMaxMs', 'soldOutGraceMs'];
 
   function tuneSig() {
     var out = '';
@@ -286,10 +292,13 @@
     /* 전체 합계. 느린 단계 3개만으로는 "우리가 기다린 시간" 이 전체에서 얼마인지
      * 알 수 없다. 줄일 여지가 있는 쪽이 어디인지 이 줄 하나로 보인다. */
     var c = S.byCause || {}, keys = Object.keys(c).sort(function (x, y) { return c[y] - c[x]; });
-    if (!keys.length) return slow;
+    /* 발사가 일러서(선발사 과다) 날짜/좌석이 아직 없어 다시 불러왔다면 그 횟수를 붙인다.
+     * 한 번이 약 3~4초라, 이게 0 이 아니면 선발사를 줄여야 한다는 직접적 신호다. */
+    var re = S.openReloads ? '  ·  재고침 ' + S.openReloads + '회(발사 이름)' : '';
+    if (!keys.length) return slow + re;
     return slow + '  |  전체: ' + keys.map(function (k) {
       return k + ' ' + (c[k] / 1000).toFixed(1) + 's';
-    }).join(', ');
+    }).join(', ') + re;
   }
 
   function log(msg) {
@@ -545,6 +554,8 @@
    * 지우는 곳을 하나로 둔다. 새 상태를 추가할 때도 여기만 고치면 둘이 같이 간다. */
   function resetRunState() {
     S.openWaitSince = 0;
+    S.soldOutSince = 0;
+    S.openReloads = 0;
     S.endedAt = 0;
     S.problem = false;
     S.fixSince = 0; S.fixPhase = 0; S.fixClickAt = 0; S.fixOpens = 0;
@@ -1031,6 +1042,7 @@
       }
       if (now - lastOpenReloadAt < S.openRetryMs) return;
       lastOpenReloadAt = now;
+      S.openReloads = (S.openReloads || 0) + 1;
       S.idx = 0;
       save();
       log('목표 날짜(' + S.expectDate + ')가 아직 달력에 없습니다 - 새로고침하고 다시 봅니다');
@@ -1074,6 +1086,26 @@
       if (step.dynamicCabin && U.onDeparture() && waitedMs > S.retryClickMs
           && (answered || U.cabinListReady())) {
         if (!S.openWaitSince) S.openWaitSince = now;
+        /* 서버가 '이 등급 매진(soldout:true)' 이라고 명확히 말하면, 계속 새로고침해봐야
+         * 좌석은 다시 안 판다. 다만 09:00 정각엔 몇 백ms 늦게 풀리는 경우가 있어
+         * soldOutGraceMs 만큼은 지켜보고, 그동안 계속 매진이면 즉시 멈춘다.
+         * (예전엔 openWaitMaxMs 180초를 다 채워 3분을 헛돌았다.) */
+        var so = null;
+        try {
+          var P3 = W.KE_PROBE || window.KE_PROBE;
+          if (P3 && P3.keCabin) so = P3.keCabin(S.cabin, S.expectDate || S.fixDate);
+        } catch (e) {}
+        if (so && so.soldout) {
+          if (!S.soldOutSince) S.soldOutSince = now;
+          if (now - S.soldOutSince > S.soldOutGraceMs) {
+            finish('"' + S.cabin + '" 매진'
+                   + (so.eySeats ? ' (일반석 ' + so.eySeats + '석 남음)' : '')
+                   + ' - ' + secs(elapsed()) + ' 지점, 재고침 ' + (S.openReloads || 0) + '회', true);
+            return;
+          }
+        } else if (S.soldOutSince) {
+          S.soldOutSince = 0;   // 다시 열렸다(좌석이 돌아옴) - 매진 판정 취소
+        }
         if (now - S.openWaitSince > S.openWaitMaxMs) {
           finish('"' + S.cabin + '" 좌석이 ' + Math.round(S.openWaitMaxMs / 1000)
                  + '초 동안 안 나왔습니다 - 화면을 확인하세요', true);
@@ -1081,6 +1113,7 @@
         }
         if (now - lastOpenReloadAt < S.openRetryMs) return;
         lastOpenReloadAt = now;
+        S.openReloads = (S.openReloads || 0) + 1;
         save();
         log('조회 결과에 "' + S.cabin + '" 이(가) 없습니다 - 새로고침하고 다시 봅니다 ('
             + Math.round((now - S.openWaitSince) / 1000) + '초째)');
