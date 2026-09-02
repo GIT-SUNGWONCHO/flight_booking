@@ -116,6 +116,11 @@ def main() -> int:
         b = pw.chromium.connect_over_cdp(f"http://localhost:{a.port}")
         ctx = b.contexts[0]
         js = USER.read_text(encoding="utf-8")
+        # 새 문서가 뜰 때마다 스크립트를 '페이지 스크립트보다 먼저' 넣는다.
+        # 이게 없으면 (a) 발사 후 새로고침에서 매크로가 사라져 재생이 멈추고
+        # (b) 조회 XHR 이 우리가 주입하기 전에 끝나 프로브가 놓친다.
+        # 실측(2026-09-02): 이것 없이 돌렸다가 기록 0건 - 달력에서 한 발도 못 나갔다.
+        ctx.add_init_script(js)
         page = [p for p in ctx.pages if "koreanair" in p.url][-1]
         try: page.bring_to_front()
         except Exception: pass
@@ -146,6 +151,7 @@ def main() -> int:
         seen_stamp = -1
         gone_at = None
         best_seats = None
+        last_new = time.time()   # 마지막으로 '새 응답' 을 본 시각 (재조회 강제 판단용)
         while datetime.now(KST) < end_at:
             try:
                 if not page.evaluate("() => !!window.KE_REC"):
@@ -159,6 +165,7 @@ def main() -> int:
 
             if d and d.get("stamp") != seen_stamp and (d.get("pr") or d.get("ey")):
                 seen_stamp = d["stamp"]
+                last_new = time.time()
                 pr, ey = d.get("pr") or {}, d.get("ey") or {}
                 now = datetime.now(KST)
                 secs = round((now - open_at).total_seconds(), 2)
@@ -180,12 +187,24 @@ def main() -> int:
                 if gone_at:
                     break
 
-            # 재조회: 조회 화면이면 날짜 띠를 다시 누른다
+            # 재조회. 날짜 띠를 다시 눌러보되, 이미 선택된 날짜면 아무 일도 안 일어난다
+            # (실측: 그래서 표본이 1건에서 멈췄다). 새 응답이 한동안 없으면 새로고침으로
+            # 강제 재조회한다 - 1->0 전환을 잡으려면 반복 측정이 필수다.
+            pressed = None
             try:
-                page.evaluate(REPRESS, a.date)
+                pressed = page.evaluate(REPRESS, a.date)
             except Exception:
                 pass
             time.sleep(a.gap)
+            # 조회 API 가 ~1.7초 + 렌더라, 너무 급하게 새로고침하면 응답이 오기 전에
+            # 페이지를 날려 표본이 0건이 된다(실측). 최소 6초는 기다린 뒤에만 강제한다.
+            if (time.time() - last_new) > max(6.0, a.gap * 4):
+                try:
+                    page.reload(wait_until="domcontentloaded", timeout=20000)
+                    last_new = time.time()   # 새로고침 자체에 시간이 걸리니 기준을 옮긴다
+                    log(f"재조회(새로고침) - 띠 누르기 결과={pressed}")
+                except Exception:
+                    pass
 
         report.update(ok=True, rows=rows, maxPrestigeSeats=best_seats,
                       goneAt=gone_at.isoformat() if gone_at else None,
