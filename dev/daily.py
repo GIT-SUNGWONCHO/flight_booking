@@ -76,8 +76,8 @@ def main() -> int:
     if not a.no_macro:
         cmd = [sys.executable, str(ROOT / "dev" / "autorun.py"),
                "--route", route, "--date", mmdd, "--at", a.at, "--dry"]
-        # autorun 은 아직 --from 이 없다. 유럽발 연습은 계측기로만 하고,
-        # 매크로 속도 측정은 방향과 무관하므로 한국발로 돌려도 값은 유효하다.
+        if origin:
+            cmd += ["--from", origin]
         procs["macro"] = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                           stderr=subprocess.STDOUT, text=True)
         log("dry 매크로 시작 (1번 크롬, 주문 안 만듦)")

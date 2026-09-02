@@ -61,11 +61,21 @@ REPRESS = """(mmdd) => {
   return 'ok';
 }"""
 
+# '새 응답인가' 는 조회 응답의 도착 시각(epoch ms)으로 판단한다.
+# stamp 는 문서마다 0 부터 다시 세서, 새로고침하면 값이 같아져 새 응답을 놓친다(실측:
+# 표본이 2건에서 멈췄다). 시각은 문서를 넘어 단조증가하므로 안전하다.
 READ = """(cab) => {
   const P = window.KE_PROBE;
   if (!P || !P.keCabin) return null;
+  var last = 0;
+  try {
+    var hs = P.hits();
+    for (var i = hs.length - 1; i >= 0; i--) {
+      if (/availab/i.test(hs[i].url)) { last = hs[i].at; break; }
+    }
+  } catch (e) {}
   return { pr: P.keCabin('프레스티지', cab), ey: P.keCabin('일반석', cab),
-           stamp: P.stamp() };
+           lastAt: last };
 }"""
 
 
@@ -148,23 +158,33 @@ def main() -> int:
         page.evaluate("() => window.KE_HUD.fire('watch')")
 
         # 조회 화면에 도착할 때까지 (매크로가 날짜 클릭 + 검색을 한다)
-        seen_stamp = -1
+        seen_stamp = 0          # 마지막으로 본 조회 응답의 도착 시각(epoch ms)
         gone_at = None
         best_seats = None
         last_new = time.time()   # 마지막으로 '새 응답' 을 본 시각 (재조회 강제 판단용)
+        # 한 주기 = [새 응답을 기다렸다 기록] -> [곧바로 다음 재조회]
+        #
+        # 예전엔 '6초 동안 새 응답이 없으면' 새로고침해서 주기가 11초까지 늘어졌다(실측).
+        # 1->0 전환을 좁히려면 응답이 오는 즉시 다음 재조회를 걸어야 한다.
+        # 날짜 띠 다시 누르기는 이미 선택된 날짜면 아무 일도 안 하므로(실측) 새로고침으로 건다.
+        # 조회 페이지 새로고침은 세션의 날짜를 유지한 채 다시 조회한다(실측 확인).
         while datetime.now(KST) < end_at:
-            try:
-                if not page.evaluate("() => !!window.KE_REC"):
-                    page.evaluate(js)
-            except Exception:
-                time.sleep(0.2); continue
-            try:
-                d = page.evaluate(READ, a.date)
-            except Exception:
-                time.sleep(0.2); continue
+            waited = time.time()
+            d = None
+            while datetime.now(KST) < end_at and (time.time() - waited) < 8:
+                try:
+                    if not page.evaluate("() => !!window.KE_REC"):
+                        page.evaluate(js)
+                    d = page.evaluate(READ, a.date)
+                except Exception:
+                    time.sleep(0.25); continue
+                if d and (d.get("lastAt") or 0) > seen_stamp and (d.get("pr") or d.get("ey")):
+                    break
+                d = None
+                time.sleep(0.25)
 
-            if d and d.get("stamp") != seen_stamp and (d.get("pr") or d.get("ey")):
-                seen_stamp = d["stamp"]
+            if d:
+                seen_stamp = d["lastAt"]
                 last_new = time.time()
                 pr, ey = d.get("pr") or {}, d.get("ey") or {}
                 now = datetime.now(KST)
@@ -187,24 +207,14 @@ def main() -> int:
                 if gone_at:
                     break
 
-            # 재조회. 날짜 띠를 다시 눌러보되, 이미 선택된 날짜면 아무 일도 안 일어난다
-            # (실측: 그래서 표본이 1건에서 멈췄다). 새 응답이 한동안 없으면 새로고침으로
-            # 강제 재조회한다 - 1->0 전환을 잡으려면 반복 측정이 필수다.
-            pressed = None
+            # 곧바로 다음 재조회를 건다. 서버 부담 하한(gap)만 지킨다.
+            if datetime.now(KST) >= end_at:
+                break
+            time.sleep(max(0.0, a.gap - (time.time() - last_new)))
             try:
-                pressed = page.evaluate(REPRESS, a.date)
+                page.reload(wait_until="domcontentloaded", timeout=20000)
             except Exception:
                 pass
-            time.sleep(a.gap)
-            # 조회 API 가 ~1.7초 + 렌더라, 너무 급하게 새로고침하면 응답이 오기 전에
-            # 페이지를 날려 표본이 0건이 된다(실측). 최소 6초는 기다린 뒤에만 강제한다.
-            if (time.time() - last_new) > max(6.0, a.gap * 4):
-                try:
-                    page.reload(wait_until="domcontentloaded", timeout=20000)
-                    last_new = time.time()   # 새로고침 자체에 시간이 걸리니 기준을 옮긴다
-                    log(f"재조회(새로고침) - 띠 누르기 결과={pressed}")
-                except Exception:
-                    pass
 
         report.update(ok=True, rows=rows, maxPrestigeSeats=best_seats,
                       goneAt=gone_at.isoformat() if gone_at else None,
@@ -221,8 +231,17 @@ def main() -> int:
                                 "date": a.date, "maxPrestigeSeats": best_seats,
                                 "goneSinceOpen": report.get("goneSinceOpen"),
                                 "samples": len(rows)}, ensure_ascii=False) + "\n")
-        log(f"기록 {len(rows)}건 -> dev-shots/watch_seats.json"
-            + (f" / 프레스티지 최대 {best_seats}석" if best_seats else " / 프레스티지 못 봄")
+        # '읽었는데 매진' 과 '아예 못 읽음' 은 전혀 다른 결과다. 뭉뚱그리면 다음날
+        # 기록을 볼 때 계측이 실패한 건지 좌석이 없던 건지 구분이 안 된다.
+        ever = any(r.get("prListed") for r in rows)
+        if best_seats:
+            note = f" / 프레스티지 최대 {best_seats}석"
+        elif ever:
+            note = " / 프레스티지 처음부터 매진(0석)"
+        else:
+            note = " / 프레스티지 정보 없음(계측 실패 가능)"
+        report["prestigeEverListed"] = ever
+        log(f"기록 {len(rows)}건 -> dev-shots/watch_seats.json" + note
             + (f" / 오픈+{report['goneSinceOpen']}초에 0" if gone_at else ""))
         b.close()
     return 0

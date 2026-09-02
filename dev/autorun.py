@@ -76,7 +76,9 @@ def ensure_browser() -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--at", default="+60s", help="발사 시각 (09:00 또는 +90s)")
-    ap.add_argument("--route", default="", help="도착지 코드 (CDG/FCO/ZRH). 생략하면 현재 설정")
+    ap.add_argument("--route", default="", help="도착지 코드 (CDG/FCO/ZRH/ICN). 생략하면 현재 설정")
+    # 유럽발(로마->인천 등). 9/9 목표가 FCO->ICN 이라 필요하다. setup 으로 넘긴다.
+    ap.add_argument("--from", dest="origin", default="", help="출발지 코드 (유럽발이면 FCO/CDG)")
     ap.add_argument("--cabin", default="프레스티지")
     ap.add_argument("--date", default="", help="목표 날짜 MM-DD (비우면 검사 안 함)")
     ap.add_argument("--dry", action="store_true", help="7단계(첫 주문) 앞에서 멈춘다")
@@ -96,6 +98,8 @@ def main() -> int:
     # 목표 날짜의 '월' 로 달력을 옮겨야 그 날짜가 보인다. setup 은 YYYY-MM-DD 를 받는다.
     # 마일리지는 ~1년 뒤를 열므로, 목표 월이 이번 달보다 이르면 내년으로 본다.
     setup_cmd = [sys.executable, str(ROOT / "dev" / "setup.py")] + ([a.route] if a.route else [])
+    if a.origin:
+        setup_cmd += ["--from", a.origin]
     if a.date:
         mm, dd = a.date.split("-")
         yr = datetime.now(KST).year + (1 if int(mm) < datetime.now(KST).month else 0)
