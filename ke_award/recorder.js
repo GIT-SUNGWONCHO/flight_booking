@@ -1103,11 +1103,25 @@
          * 좌석은 다시 안 판다. 다만 09:00 정각엔 몇 백ms 늦게 풀리는 경우가 있어
          * soldOutGraceMs 만큼은 지켜보고, 그동안 계속 매진이면 즉시 멈춘다.
          * (예전엔 openWaitMaxMs 180초를 다 채워 3분을 헛돌았다.) */
-        var so = null;
+        var so = null, P3 = null;
         try {
-          var P3 = W.KE_PROBE || window.KE_PROBE;
+          P3 = W.KE_PROBE || window.KE_PROBE;
           if (P3 && P3.keCabin) so = P3.keCabin(S.cabin, S.expectDate || S.fixDate);
         } catch (e) {}
+        /* 응답은 왔는데 그 등급을 못 읽었다면, 화면이 '다른 날짜' 를 조회 중일 수 있다.
+         * 그걸 "좌석이 아직 안 열렸다" 로 오해하면 영원히 새로고침만 한다
+         * (실측 2026-09-02 조회모드: 목표 08-11 인데 화면은 08-06 을 보고 있었다).
+         * 엉뚱한 날짜로 예매하는 것이 최악이므로, 조용히 도는 대신 분명히 멈춘다. */
+        var wantD = S.expectDate || S.fixDate;
+        if (!so && answered && wantD) {
+          var shown = null;
+          try { shown = P3 && P3.shownDate ? P3.shownDate() : null; } catch (e) {}
+          if (shown && U.sameDate(wantD, shown) !== true) {
+            finish('화면이 다른 날짜(' + shown + ')를 조회 중입니다 - 목표 '
+                   + wantD + ' 로 맞춰주세요', true);
+            return;
+          }
+        }
         if (so && so.soldout) {
           if (!S.soldOutSince) S.soldOutSince = now;
           if (now - S.soldOutSince > S.soldOutGraceMs) {
