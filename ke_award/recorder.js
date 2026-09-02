@@ -556,6 +556,7 @@
     S.openWaitSince = 0;
     S.soldOutSince = 0;
     S.openReloads = 0;
+    S.blocks = [];        // 이번 실행에서 무엇이 버튼을 덮었나 (가림 진단)
     S.endedAt = 0;
     S.problem = false;
     S.fixSince = 0; S.fixPhase = 0; S.fixClickAt = 0; S.fixOpens = 0;
@@ -997,6 +998,18 @@
       try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
     }
     if (el && !U.hittable(el)) {
+      /* 무엇이 덮었는지 남긴다. '가림'으로 버린 시간을 줄이려면 정체를 알아야 하는데,
+       * 실전(2026-09-02)에서 7단계 가림 1.1초가 찍혔지만 원인을 알 수 없었다.
+       * 단계마다 처음 막힌 순간 한 번만 기록한다(매 tick 훑으면 비싸다). */
+      if (!blockedEl) {
+        try {
+          S.blocks = S.blocks || [];
+          S.blocks.push({ step: S.idx + 1, at: Date.now(),
+                          label: String(step.text || step.sel || '').slice(0, 20),
+                          info: U.coverInfo(el) });
+          if (S.blocks.length > 10) S.blocks.shift();
+        } catch (e) {}
+      }
       blockedEl = el;
       el = null;
     } else {

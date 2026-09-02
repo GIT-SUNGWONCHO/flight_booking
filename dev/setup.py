@@ -44,6 +44,12 @@ def main() -> int:
         i = args.index("--date")
         want_date = args[i + 1]
         del args[i:i + 2]
+    # 출발지. 유럽발(로마->인천 등) 목표가 생겨서 필요해졌다 - 지금까지는 늘 SEL 이었다.
+    want_from = ""
+    if "--from" in args:
+        i = args.index("--from")
+        want_from = args[i + 1].upper()
+        del args[i:i + 2]
     departure = "--departure" in args
     if departure:
         args.remove("--departure")
@@ -222,18 +228,18 @@ def main() -> int:
         log(f"가까운 날짜 함께 조회: {flex}")
         page.wait_for_timeout(1500)
 
-        if want:
-            log(f"도착지 {want} 로 변경 시도")
-            # 도착지 버튼은 값이 있으면 "도착지 CDG 파리", 비어 있으면 "To 도착지" 로
-            # 라벨이 바뀐다 (새 프로필은 늘 비어 있다). 라벨로 찾으면 빈 상태에서
-            # 못 잡으므로, 상태와 무관한 클래스(-order3 = 도착지 칸)로 잡는다.
-            page.evaluate("""(code) => {
+        # 출발지/도착지 공용. 유럽발 목표(로마->인천)가 생겨 출발지도 바꿔야 한다.
+        # order1 = 출발지, order3 = 도착지. 값이 있으면 "도착지 CDG 파리", 비어 있으면
+        # "To 도착지" 로 라벨이 바뀌므로 라벨이 아니라 order 클래스로 잡는다.
+        def set_fromto(order, code, name):
+            log(f"{name} {code} 로 변경 시도")
+            page.evaluate("""(o) => {
               const U = window.KE_UTIL;
               const btn = U.candidates(document).find(e => U.visible(e)
                 && /ui-fromto__button/.test((e.className||'').toString())
-                && /-order3/.test((e.className||'').toString()));
+                && new RegExp('-order' + o + '(\\\\s|$)').test((e.className||'').toString()));
               if (btn) U.fireClick(btn);
-            }""", want)
+            }""", order)
             page.wait_for_timeout(2500)
 
             # 선택기는 '최근 검색' 만 보여준다. 처음 가는 도시는 목록에 없으므로
@@ -257,24 +263,19 @@ def main() -> int:
               box.dispatchEvent(new Event('input', { bubbles: true }));
               box.dispatchEvent(new Event('change', { bubbles: true }));
               return true;
-            }""", want)
+            }""", code)
             if typed:
                 log("  검색칸에 코드 입력")
                 page.wait_for_timeout(2500)
 
-            # 후보 고르기. 두 갈래를 다 본다.
-            #  1) '최근 검색' 목록 - 클릭 가능한 요소라 candidates 로 잡힌다
-            #  2) 검색 자동완성 - 항목이 ui-autocomplete__option-* 안의 SPAN/MARK/EM 이라
-            #     클릭 가능 목록에 안 걸린다. 도시명과 코드가 서로 다른 요소로 쪼개져 있어
-            #     (예: "밀라노/말펜사, 이탈리아" 와 <em>MXP</em>) 한 요소만 봐서는 못 찾는다.
-            #     실측(2026-08-29): 이걸 안 봐서 밀라노가 "없다" 고 잘못 판단했다.
-            #     -> 항목 행까지 올라가 행 전체 글자로 맞춘다.
+            # 후보 고르기. 자동완성 항목을 '먼저' 본다.
+            #   실측(2026-09-02): 코드가 든 아무 요소나 고르면 "여정 1 출발지 SEL -
+            #   도착지 FCO 로마" 같은 여정 요약을 눌러버려 출발지가 안 바뀌었다.
+            #   자동완성 항목은 도시명과 코드가 다른 요소로 쪼개져 있어(예: <em>FCO</em>)
+            #   항목 행까지 올라가 행 전체 글자로 맞춘다.
+            #   자동완성이 없으면 최근검색 목록으로 떨어진다 - 둘 다 없으면 아래에서 멈춘다.
             ok = page.evaluate("""(code) => {
               const U = window.KE_UTIL;
-              const hit = U.candidates(document).find(e => U.visible(e) && U.label(e).indexOf(code) !== -1
-                          && !/ui-fromto__button/.test((e.className||'').toString()));
-              if (hit) { U.fireClick(hit); return U.label(hit).replace(/\\s+/g,' ').slice(0,34); }
-
               let row = null;
               const walk = (root, d) => {
                 if (d > 12 || row) return;
@@ -293,21 +294,57 @@ def main() -> int:
                 }
               };
               walk(document, 0);
-              if (!row) return null;
-              U.fireClick(row);
-              return (row.innerText||'').replace(/\\s+/g,' ').slice(0,34);
-            }""", want)
+              if (row) { U.fireClick(row); return (row.innerText||'').replace(/\\s+/g,' ').slice(0,34); }
+
+              const hit = U.candidates(document).find(e => U.visible(e)
+                && U.label(e).indexOf(code) !== -1
+                && !/ui-fromto__button/.test((e.className||'').toString())
+                && !/여정/.test(U.label(e)));
+              if (hit) { U.fireClick(hit); return U.label(hit).replace(/\\s+/g,' ').slice(0,34); }
+              return null;
+            }""", code)
             page.wait_for_timeout(2500)
-            now = page.evaluate("""() => {
+            now = page.evaluate("""(o) => {
               const U = window.KE_UTIL;
               const b = U.candidates(document).find(e => U.visible(e)
                 && /ui-fromto__button/.test((e.className||'').toString())
-                && /-order3/.test((e.className||'').toString()));
+                && new RegExp('-order' + o + '(\\\\s|$)').test((e.className||'').toString()));
               return b ? U.label(b).replace(/\\s+/g,' ').slice(0,30) : null;
-            }""")
-            log(f"  도착지 선택: {ok or '후보 못 찾음'} -> 현재 {now}")
-            if not now or want not in now:
-                # 엉뚱한 노선으로 조회하면 그때부터 전부 헛일이다. 여기서 끊는다.
+            }""", order)
+            log(f"  {name} 선택: {ok or '후보 못 찾음'} -> 현재 {now}")
+            # 진짜 안전장치: 눌렀다고 믿지 않고 칸이 실제로 바뀌었는지 본다.
+            return (bool(now) and code in now), now
+
+        def read_fromto(order):
+            return page.evaluate("""(o) => {
+              const U = window.KE_UTIL;
+              const b = U.candidates(document).find(e => U.visible(e)
+                && /ui-fromto__button/.test((e.className||'').toString())
+                && new RegExp('-order' + o + '(\\\\s|$)').test((e.className||'').toString()));
+              return b ? U.label(b).replace(/\\s+/g,' ').slice(0,30) : null;
+            }""", order)
+
+        # 출발지를 먼저 바꾼다 (도착지보다 먼저여야 목록이 노선에 맞게 나온다).
+        #
+        # --from 이 없으면 SEL 이 기본이다. 그냥 두면 안 된다 - 유럽발(로마->인천)을 한 번
+        # 쓰고 나면 위젯에 FCO 가 남아, 다음 실행이 조용히 'FCO -> CDG' 같은 엉뚱한 노선으로
+        # 돈다. 지금 값이 이미 맞으면 건드리지 않는다(불필요한 8초를 아낀다).
+        target_from = want_from or "SEL"
+        cur_from = read_fromto(1)
+        if not cur_from or target_from not in cur_from:
+            log(f"출발지 정정 필요: 현재 '{cur_from}' -> {target_from}")
+            good, now = set_fromto(1, target_from, "출발지")
+            if not good:
+                print(json.dumps({"ok": False, "url": page.url,
+                                  "why": f"출발지를 {target_from} 로 못 바꿈 (현재: {now})"},
+                                 ensure_ascii=False))
+                return 6
+        else:
+            log(f"출발지 그대로: {cur_from}")
+
+        if want:
+            good, now = set_fromto(3, want, "도착지")
+            if not good:
                 print(json.dumps({"ok": False, "url": page.url,
                                   "why": f"도착지를 {want} 로 못 바꿈 (현재: {now})"},
                                  ensure_ascii=False))

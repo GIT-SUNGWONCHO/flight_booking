@@ -42,6 +42,36 @@
     return top === el || el.contains(top) || top.contains(el);
   }
 
+  /* 무엇이 이 요소를 덮고 있나 (가림 진단용).
+   *
+   * hittable 은 "막혔다/아니다" 만 알려줘서, 실전에서 '가림 1.1초' 가 찍혀도 정체를
+   * 알 수 없었다. 줄이려면 무엇이 덮었는지를 봐야 한다 - 로딩 오버레이인지, 광고인지,
+   * 스티키 헤더인지에 따라 대응이 다르다. 그래서 덮은 요소를 그대로 남긴다. */
+  function coverInfo(el) {
+    function d(n) {
+      if (!n) return null;
+      var q = {};
+      try { q = n.getBoundingClientRect(); } catch (e) {}
+      return {
+        tag: n.tagName || '',
+        id: n.id || '',
+        cls: (n.className || '').toString().slice(0, 90),
+        text: (n.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 50),
+        rect: { x: Math.round(q.x || 0), y: Math.round(q.y || 0),
+                w: Math.round(q.width || 0), h: Math.round(q.height || 0) }
+      };
+    }
+    try {
+      var r = el.getBoundingClientRect();
+      var x = r.left + r.width / 2, y = r.top + r.height / 2;
+      var top = document.elementFromPoint(x, y);
+      if (!top) return { why: 'elementFromPoint 가 아무것도 못 잡음', target: d(el) };
+      return { target: d(el), cover: d(top), coverParent: d(top.parentElement) };
+    } catch (e) {
+      return { why: String(e).slice(0, 60) };
+    }
+  }
+
   /* 이미 켜져(동의되어) 있는가.
    * 동의 버튼은 토글이라 이미 켜진 걸 다시 누르면 꺼진다. 녹화에 같은 동의가 두 번
    * 들어가 있으면 두 번째 클릭이 동의를 풀어버리고, 그 뒤 모달이 안 떠서 흐름이 통째로
@@ -706,6 +736,7 @@
   var U = {
     visible: visible, label: label, cssPath: cssPath, findEl: findEl, CLICKABLE: CLICKABLE,
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
+    coverInfo: coverInfo,
     findLatestOpenDate: findLatestOpenDate, findOpenDate: findOpenDate,
     openDateCells: openDateCells, inChrome: inChrome, realTarget: realTarget,
     findCabin: findCabin, cabinListReady: cabinListReady, tabKey: tabKey,

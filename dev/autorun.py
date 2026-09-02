@@ -80,6 +80,8 @@ def main() -> int:
     ap.add_argument("--cabin", default="프레스티지")
     ap.add_argument("--date", default="", help="목표 날짜 MM-DD (비우면 검사 안 함)")
     ap.add_argument("--dry", action="store_true", help="7단계(첫 주문) 앞에서 멈춘다")
+    ap.add_argument("--lead", type=int, default=2500,
+                    help="선발사(ms). 오픈시각보다 이만큼 일찍 새로고침해 조회가 09:00 직후 도착하게 한다")
     a = ap.parse_args()
 
     fire_at = target_time(a.at)
@@ -91,8 +93,14 @@ def main() -> int:
         return finish(False, "브라우저를 띄우지 못함 (PC 가 켜져 있는지 확인)", 1)
 
     # --- 준비: 달력까지 ---
-    r = subprocess.run([sys.executable, str(ROOT / "dev" / "setup.py")] + ([a.route] if a.route else []),
-                       capture_output=True, text=True, timeout=420)
+    # 목표 날짜의 '월' 로 달력을 옮겨야 그 날짜가 보인다. setup 은 YYYY-MM-DD 를 받는다.
+    # 마일리지는 ~1년 뒤를 열므로, 목표 월이 이번 달보다 이르면 내년으로 본다.
+    setup_cmd = [sys.executable, str(ROOT / "dev" / "setup.py")] + ([a.route] if a.route else [])
+    if a.date:
+        mm, dd = a.date.split("-")
+        yr = datetime.now(KST).year + (1 if int(mm) < datetime.now(KST).month else 0)
+        setup_cmd += ["--date", f"{yr}-{mm}-{dd}"]
+    r = subprocess.run(setup_cmd, capture_output=True, text=True, timeout=420)
     tail = (r.stdout or "").strip().splitlines()
     try:
         st = json.loads(tail[-1]) if tail else {}
@@ -127,14 +135,34 @@ def main() -> int:
           H.state.armed = false;
         }""", {"cabin": a.cabin, "date": a.date, "dry": a.dry})
 
-        wait = (fire_at - datetime.now(KST)).total_seconds()
+        # 선발사: 오픈시각보다 lead 만큼 일찍 새로고침한다. 페이지가 뜨는 데 ~2.5초가
+        # 걸려서, 08:59:57.5 에 쏘면 조회가 09:00:01 경 (오픈 직후) 도착해 재고침을 피한다.
+        lead_at = fire_at - timedelta(milliseconds=a.lead)
+        report["leadMs"] = a.lead
+        report["leadFireAt"] = lead_at.isoformat()
+        wait = (lead_at - datetime.now(KST)).total_seconds()
         if wait > 0:
-            log(f"{wait:.0f}초 대기")
-            while (fire_at - datetime.now(KST)).total_seconds() > 0:
-                time.sleep(min(5, max(0.05, (fire_at - datetime.now(KST)).total_seconds())))
+            log(f"{wait:.0f}초 대기 (발사 {lead_at.strftime('%H:%M:%S.%f')[:-3]}, 오픈 {fire_at.strftime('%H:%M:%S')} - 선발사 {a.lead}ms)")
+            shown = False
+            while True:
+                left = (lead_at - datetime.now(KST)).total_seconds()
+                if left <= 0:
+                    break
+                # 발사 30초 전에 창을 앞으로 가져온다 - 사람이 눈으로 지켜볼 수 있게
+                # (겸사겸사 탭이 뒤에 있어 크롬이 타이머를 늦추는 것도 막는다)
+                if not shown and left <= 30:
+                    shown = True
+                    try:
+                        page.bring_to_front()
+                        log("창을 앞으로 (발사 30초 전)")
+                    except Exception:
+                        pass
+                time.sleep(min(5, max(0.02, left)))
 
         log("발사")
         t0 = time.time()
+        try: page.bring_to_front()      # 발사 순간에도 한 번 더 (그새 뒤로 갔을 수 있다)
+        except Exception: pass
         page.evaluate("() => window.KE_HUD.fire('autorun')")
 
         last, popup = -1, False

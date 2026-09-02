@@ -30,6 +30,9 @@ def main() -> int:
     ap.add_argument("--no-setup", action="store_true", help="이미 달력에 서 있으면 셋업 건너뜀")
     ap.add_argument("--dry", action="store_true",
                     help="7단계(첫 주문) 앞에서 멈춘다 - 좌석 선점(hold)도 안 만든다")
+    ap.add_argument("--pay", action="store_true",
+                    help="끝까지 간다: 결제하기까지 눌러 결제창(네이버페이)을 연다. "
+                         "7단계에서 진짜 좌석 hold 가 생긴다 - 매진 아닌 좌석으로만 쓸 것")
     a = ap.parse_args()
     mmdd = a.date[5:] if a.date else ""   # YYYY-MM-DD -> MM-DD (비우면 최신 오픈일)
 
@@ -59,19 +62,19 @@ def main() -> int:
         page.evaluate(js)
 
         # 결제는 강제로 끈다. 달력 모드, 목표 등급/날짜로 세팅하고 발사.
-        page.evaluate("""({cabin, date, dry}) => {
+        page.evaluate("""({cabin, date, dry, pay}) => {
           const R = window.KE_REC, H = window.KE_HUD;
           R.pause('realtest'); R.state.playAfterReload = false;
           R.loadBaked();
           if (dry) R.state.steps = R.state.steps.slice(0, 6);   // 7단계(첫 주문) 앞까지만
           R.state.cabin = cabin;
           R.state.expectDate = date;         // 비우면 최신 오픈일
-          R.state.allowPay = false;          // 절대 결제까지 안 감
+          R.state.allowPay = !!pay;          // --pay 일 때만 결제창까지
           R.state.byCause = {}; R.state.problem = false; R.state.openReloads = 0;
           R.reset(); R.save();
           H.state.startAt = 'calendar'; H.state.armed = false; H.save();
-        }""", {"cabin": a.cabin, "date": mmdd, "dry": a.dry})
-        log(f"발사 (목표 {mmdd or '최신 오픈일'} {a.cabin}, 결제 OFF, dry={a.dry})")
+        }""", {"cabin": a.cabin, "date": mmdd, "dry": a.dry, "pay": a.pay})
+        log(f"발사 (목표 {mmdd or '최신 오픈일'} {a.cabin}, 결제 {'ON(결제창까지)' if a.pay else 'OFF'}, dry={a.dry})")
         t0 = time.time()
         page.evaluate("() => window.KE_HUD.fire('realtest')")
 
@@ -95,10 +98,17 @@ def main() -> int:
                 last = s["idx"]
             if not s["playing"] and s["idx"] > 0:
                 log(f"멈춤: {s['msg']}")
+                popup = any(("pay.naver" in p.url) or ("payment-loading" in p.url)
+                            or ("npay" in p.url) for p in ctx.pages)
+                if popup:
+                    log("★ 결제창(네이버페이) 열림 확인 - 끝까지 갔다")
                 report = {"at": datetime.now(KST).isoformat(), "route": a.route, "date": a.date,
                           "cabin": a.cabin, "idx": s["idx"], "total": s["n"],
                           "message": s["msg"], "problem": s["problem"], "reloads": s["reloads"],
-                          "seconds": round(time.time() - t0, 2)}
+                          "payWindow": popup, "seconds": round(time.time() - t0, 2)}
+                try:
+                    report["blocks"] = page.evaluate("() => (KE_REC.state.blocks || [])")
+                except Exception: pass
                 try:
                     report["seats"] = page.evaluate("() => window.KE_PROBE ? KE_PROBE.seatTimeline() : []")
                     report["keCabin"] = page.evaluate(

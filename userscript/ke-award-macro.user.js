@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         대한항공 마일리지 예매 보조 (KE Award Macro)
 // @namespace    local.ke.award
-// @version      1.52.0-dirty
+// @version      1.53.0-dirty
 // @description  예매 단계 녹화/재생 + 오픈시각 정시 발사 + 안내사항 모달 즉시 통과
 // @author       local
 // @match        *://*.koreanair.com/*
@@ -58,6 +58,36 @@ try {
      * 패널이 가린 버튼(화면 하단의 결제하기 등)을 "모달에 막혔다" 고 오판한다. */
     try { if (top.closest && top.closest('#ke-hud, #ke-editor, #ke-export')) return true; } catch (e) {}
     return top === el || el.contains(top) || top.contains(el);
+  }
+
+  /* 무엇이 이 요소를 덮고 있나 (가림 진단용).
+   *
+   * hittable 은 "막혔다/아니다" 만 알려줘서, 실전에서 '가림 1.1초' 가 찍혀도 정체를
+   * 알 수 없었다. 줄이려면 무엇이 덮었는지를 봐야 한다 - 로딩 오버레이인지, 광고인지,
+   * 스티키 헤더인지에 따라 대응이 다르다. 그래서 덮은 요소를 그대로 남긴다. */
+  function coverInfo(el) {
+    function d(n) {
+      if (!n) return null;
+      var q = {};
+      try { q = n.getBoundingClientRect(); } catch (e) {}
+      return {
+        tag: n.tagName || '',
+        id: n.id || '',
+        cls: (n.className || '').toString().slice(0, 90),
+        text: (n.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 50),
+        rect: { x: Math.round(q.x || 0), y: Math.round(q.y || 0),
+                w: Math.round(q.width || 0), h: Math.round(q.height || 0) }
+      };
+    }
+    try {
+      var r = el.getBoundingClientRect();
+      var x = r.left + r.width / 2, y = r.top + r.height / 2;
+      var top = document.elementFromPoint(x, y);
+      if (!top) return { why: 'elementFromPoint 가 아무것도 못 잡음', target: d(el) };
+      return { target: d(el), cover: d(top), coverParent: d(top.parentElement) };
+    } catch (e) {
+      return { why: String(e).slice(0, 60) };
+    }
   }
 
   /* 이미 켜져(동의되어) 있는가.
@@ -724,6 +754,7 @@ try {
   var U = {
     visible: visible, label: label, cssPath: cssPath, findEl: findEl, CLICKABLE: CLICKABLE,
     candidates: candidates, diagnose: diagnose, diagnoseText: diagnoseText, fireClick: fireClick,
+    coverInfo: coverInfo,
     findLatestOpenDate: findLatestOpenDate, findOpenDate: findOpenDate,
     openDateCells: openDateCells, inChrome: inChrome, realTarget: realTarget,
     findCabin: findCabin, cabinListReady: cabinListReady, tabKey: tabKey,
@@ -751,7 +782,7 @@ try {
 (function () {
   var W = window;
   try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) W = unsafeWindow; } catch (e) {}
-  var B = { version: '1.52.0-dirty', hash: '299eddd-dirty' };
+  var B = { version: '1.53.0-dirty', hash: '002c054-dirty' };
   try { W.KE_BUILD = B; } catch (e) {}
   if (W !== window) { try { window.KE_BUILD = B; } catch (e) {} }
 })();
@@ -1695,6 +1726,7 @@ try {
     S.openWaitSince = 0;
     S.soldOutSince = 0;
     S.openReloads = 0;
+    S.blocks = [];        // 이번 실행에서 무엇이 버튼을 덮었나 (가림 진단)
     S.endedAt = 0;
     S.problem = false;
     S.fixSince = 0; S.fixPhase = 0; S.fixClickAt = 0; S.fixOpens = 0;
@@ -2136,6 +2168,18 @@ try {
       try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
     }
     if (el && !U.hittable(el)) {
+      /* 무엇이 덮었는지 남긴다. '가림'으로 버린 시간을 줄이려면 정체를 알아야 하는데,
+       * 실전(2026-09-02)에서 7단계 가림 1.1초가 찍혔지만 원인을 알 수 없었다.
+       * 단계마다 처음 막힌 순간 한 번만 기록한다(매 tick 훑으면 비싸다). */
+      if (!blockedEl) {
+        try {
+          S.blocks = S.blocks || [];
+          S.blocks.push({ step: S.idx + 1, at: Date.now(),
+                          label: String(step.text || step.sel || '').slice(0, 20),
+                          info: U.coverInfo(el) });
+          if (S.blocks.length > 10) S.blocks.shift();
+        } catch (e) {}
+      }
       blockedEl = el;
       el = null;
     } else {
