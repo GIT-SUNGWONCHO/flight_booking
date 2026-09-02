@@ -31,13 +31,18 @@
   var NOISE = /(analytics|googletagmanager|doubleclick|\/collect\?|languageInfo|loading_)/i;
   var SEATY = /"(seatCount|cabinSeatCount|bookingClassSeatCount|remain\w*|avail\w*Seat\w*|numberOfSeats?|bookableSeats?)"\s*:/i;
 
-  function note(kind, url, status, body) {
+  /* req = {method, body, headers}. 응답만으론 같은 조회를 다시 쏠 수 없어서 요청도 남긴다.
+   * 계측기가 이걸 그대로 되쏘면 페이지 새로고침(~2초+렌더) 없이 재조회가 되어
+   * 표본 간격이 6초에서 1초대로 줄어든다. 되쏘는 주체는 페이지 자신이라
+   * 세션·쿠키·오리진이 원래 요청과 같다. */
+  function note(kind, url, status, body, req) {
     try {
       if (!WANTED.test(String(url)) || NOISE.test(String(url))) return;
       var text = String(body == null ? '' : body);
       if (text.length > CAP) text = text.slice(0, CAP) + '…(잘림)';
       hits.push({ at: Date.now(), kind: kind, url: String(url).slice(0, 300),
-                  status: status, seaty: SEATY.test(text), body: text });
+                  status: status, seaty: SEATY.test(text), body: text,
+                  req: req || null });
       if (hits.length > MAX) hits.shift();
       stamp++;
     } catch (e) {}
@@ -49,10 +54,22 @@
     if (typeof of === 'function' && !of.__keProbe) {
       var nf = function (input, init) {
         var url = (input && input.url) || input;
+        var rq = null;
+        try {
+          var h = {};
+          var hs = (init && init.headers) || (input && input.headers);
+          if (hs) {
+            if (typeof hs.forEach === 'function') hs.forEach(function (v, k) { h[k] = v; });
+            else Object.keys(hs).forEach(function (k) { h[k] = hs[k]; });
+          }
+          rq = { method: (init && init.method) || (input && input.method) || 'GET',
+                 body: (init && typeof init.body === 'string') ? init.body : null,
+                 headers: h };
+        } catch (e) {}
         return of.apply(this, arguments).then(function (res) {
           try {
             if (WANTED.test(String(url))) {
-              res.clone().text().then(function (t) { note('fetch', url, res.status, t); },
+              res.clone().text().then(function (t) { note('fetch', url, res.status, t, rq); },
                                       function () {});
             }
           } catch (e) {}
@@ -68,15 +85,27 @@
   try {
     var XP = W.XMLHttpRequest && W.XMLHttpRequest.prototype;
     if (XP && !XP.__keProbe) {
-      var oo = XP.open, os = XP.send;
-      XP.open = function (m, u) { try { this.__keUrl = u; } catch (e) {} return oo.apply(this, arguments); };
-      XP.send = function () {
+      var oo = XP.open, os = XP.send, osh = XP.setRequestHeader;
+      XP.open = function (m, u) {
+        try { this.__keUrl = u; this.__keMethod = m; this.__keHeaders = {}; } catch (e) {}
+        return oo.apply(this, arguments);
+      };
+      /* 헤더까지 잡아야 되쏠 수 있다. 조회 API 는 Content-Type 말고도
+       * 세션/티켓 성격의 헤더를 요구할 수 있어서 원본 그대로 실어보낸다. */
+      XP.setRequestHeader = function (k, v) {
+        try { (this.__keHeaders = this.__keHeaders || {})[k] = v; } catch (e) {}
+        return osh.apply(this, arguments);
+      };
+      XP.send = function (body) {
         var self = this;
+        try { self.__keBody = (typeof body === 'string') ? body : null; } catch (e) {}
         try {
           self.addEventListener('load', function () {
             var t = '';
             try { t = (self.responseType === '' || self.responseType === 'text') ? self.responseText : ''; } catch (e) {}
-            note('xhr', self.__keUrl, self.status, t);
+            note('xhr', self.__keUrl, self.status, t,
+                 { method: self.__keMethod || 'GET', body: self.__keBody || null,
+                   headers: self.__keHeaders || {} });
           });
         } catch (e) {}
         return os.apply(this, arguments);
@@ -289,10 +318,36 @@
     return res;
   }
 
+  /* 가장 최근 조회 요청을 그대로 한 번 더 쏜다 (읽기 전용 재조회).
+   *
+   * 왜: 새로고침으로 재조회하면 페이지 로딩·렌더까지 다시 해서 표본 간격이 6초다.
+   * 같은 요청만 되쏘면 API 시간(~1.7초)만 들어 1초대 간격이 가능하다.
+   * 쏘는 주체가 페이지 자신이라 세션·쿠키·오리진이 원래 요청과 완전히 같다.
+   *
+   * 응답은 note() 를 다시 타므로 hits 에 쌓이고, keCabin 이 최신 값을 읽는다.
+   * 예약이 아니라 조회만 되쏜다 - 상태를 바꾸지 않는다. */
+  function reAsk() {
+    var src = null;
+    for (var i = hits.length - 1; i >= 0; i--) {
+      if (/availab/i.test(hits[i].url) && hits[i].req) { src = hits[i]; break; }
+    }
+    if (!src) return 'no-request';
+    try {
+      var init = { method: (src.req.method || 'GET').toUpperCase(),
+                   credentials: 'include', headers: src.req.headers || {} };
+      if (init.method !== 'GET' && init.method !== 'HEAD') init.body = src.req.body;
+      W.fetch(src.url, init);   // 응답은 fetch 래퍼가 알아서 기록한다
+      return 'sent';
+    } catch (e) {
+      return 'err:' + String(e).slice(0, 40);
+    }
+  }
+
   W.KE_PROBE = {
     hits: function () { return hits; },
     stamp: function () { return stamp; },
     keCabin: keCabin,
+    reAsk: reAsk,
     /* 좌석 조회 응답이 한 번이라도 왔는가.
      *
      * "고른 등급이 없다" 와 "페이지가 아직 안 떴다" 를 가르는 근거다. 화면만 보면

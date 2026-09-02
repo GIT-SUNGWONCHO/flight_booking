@@ -87,7 +87,11 @@ def main() -> int:
     ap.add_argument("--at", default="09:00", help="오픈 시각")
     ap.add_argument("--lead", type=int, default=2500, help="선발사(ms)")
     ap.add_argument("--until", type=int, default=90, help="오픈 후 몇 초까지 지켜볼지")
-    ap.add_argument("--gap", type=float, default=1.2, help="재조회 최소 간격(초, 서버 부담 하한)")
+    ap.add_argument("--gap", type=float, default=6.0, help="느슨한 구간의 재조회 간격(초)")
+    # 승부는 오픈 직후 20초 안에 난다(2026-09-02 실전: 1석이 10초 안에 사라짐).
+    # 그 구간만 촘촘히 보고, 이후엔 요청 수를 줄인다.
+    ap.add_argument("--fast-gap", type=float, default=1.0, help="초반 촘촘히 볼 때 간격(초)")
+    ap.add_argument("--fast-window", type=float, default=20.0, help="촘촘히 볼 구간(오픈 후 초)")
     ap.add_argument("--port", type=int, default=9223, help="2번 크롬 포트")
     ap.add_argument("--setup-at", default="", help="이 시각에 달력까지 준비 (예: 08:50)")
     a = ap.parse_args()
@@ -168,20 +172,19 @@ def main() -> int:
         # 1->0 전환을 좁히려면 응답이 오는 즉시 다음 재조회를 걸어야 한다.
         # 날짜 띠 다시 누르기는 이미 선택된 날짜면 아무 일도 안 하므로(실측) 새로고침으로 건다.
         # 조회 페이지 새로고침은 세션의 날짜를 유지한 채 다시 조회한다(실측 확인).
+        last_ask = 0.0
+        asks = 0
         while datetime.now(KST) < end_at:
-            waited = time.time()
             d = None
-            while datetime.now(KST) < end_at and (time.time() - waited) < 8:
-                try:
-                    if not page.evaluate("() => !!window.KE_REC"):
-                        page.evaluate(js)
-                    d = page.evaluate(READ, a.date)
-                except Exception:
-                    time.sleep(0.25); continue
-                if d and (d.get("lastAt") or 0) > seen_stamp and (d.get("pr") or d.get("ey")):
-                    break
+            try:
+                if not page.evaluate("() => !!window.KE_REC"):
+                    page.evaluate(js)
+                d = page.evaluate(READ, a.date)
+            except Exception:
+                time.sleep(0.2)
                 d = None
-                time.sleep(0.25)
+            if d and not ((d.get("lastAt") or 0) > seen_stamp and (d.get("pr") or d.get("ey"))):
+                d = None
 
             if d:
                 seen_stamp = d["lastAt"]
@@ -207,14 +210,25 @@ def main() -> int:
                 if gone_at:
                     break
 
-            # 곧바로 다음 재조회를 건다. 서버 부담 하한(gap)만 지킨다.
-            if datetime.now(KST) >= end_at:
-                break
-            time.sleep(max(0.0, a.gap - (time.time() - last_new)))
-            try:
-                page.reload(wait_until="domcontentloaded", timeout=20000)
-            except Exception:
-                pass
+            # 재조회를 '겹쳐서' 쏜다. 응답을 기다리지 않고 간격마다 발사하므로,
+            # API 가 1.7초 걸려도 표본 간격은 발사 간격(초반 1초)에 수렴한다.
+            # 페이지가 자기 세션으로 같은 조회를 한 번 더 하는 것이라 상태를 안 바꾼다.
+            since_open = (datetime.now(KST) - open_at).total_seconds()
+            gap = a.fast_gap if since_open < a.fast_window else a.gap
+            if (time.time() - last_ask) >= gap:
+                try:
+                    r = page.evaluate("() => window.KE_PROBE ? KE_PROBE.reAsk() : 'no-probe'")
+                except Exception:
+                    r = "err"
+                last_ask = time.time()
+                asks += 1
+                # 되쏠 요청을 아직 못 잡았으면(조회 전) 새로고침으로 대신한다.
+                if r in ("no-request", "no-probe") and since_open > 8:
+                    try:
+                        page.reload(wait_until="domcontentloaded", timeout=20000)
+                    except Exception:
+                        pass
+            time.sleep(0.15)
 
         report.update(ok=True, rows=rows, maxPrestigeSeats=best_seats,
                       goneAt=gone_at.isoformat() if gone_at else None,
