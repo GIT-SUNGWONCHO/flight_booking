@@ -44,6 +44,13 @@ def main() -> int:
         i = args.index("--date")
         want_date = args[i + 1]
         del args[i:i + 2]
+    # 붙을 크롬. 계측기는 2번 크롬(9223)을 쓴다 - 실전 예약(9222)과 프로필을 나눠야
+    # 쿠키·localStorage 가 안 섞이고 9시에 둘을 동시에 돌릴 수 있다.
+    cdp = CDP
+    if "--port" in args:
+        i = args.index("--port")
+        cdp = f"http://localhost:{int(args[i + 1])}"
+        del args[i:i + 2]
     # 출발지. 유럽발(로마->인천 등) 목표가 생겨서 필요해졌다 - 지금까지는 늘 SEL 이었다.
     want_from = ""
     if "--from" in args:
@@ -57,7 +64,7 @@ def main() -> int:
 
     with sync_playwright() as pw:
         try:
-            b = pw.chromium.connect_over_cdp(CDP)
+            b = pw.chromium.connect_over_cdp(cdp)
         except Exception as e:
             print(json.dumps({"ok": False, "why": f"브라우저 없음 ({e})"[:80]}, ensure_ascii=False))
             return 1

@@ -1,18 +1,22 @@
-"""좌석 계측기: 09:00 부터 프레스티지 좌석수(KEBONUSPR)가 1->0 으로 바뀌는 시각을 잰다.
+"""좌석 계측기: 09:00 에 새로 열리는 날짜의 프레스티지 좌석이 몇 석이고
+언제 0 이 되는지 잰다. 읽기 전용 - 예약은 절대 하지 않는다.
 
-watch_open.py 는 '달력에 날짜가 뜨는 순간'(일반석 기준)만 본다. 프레스티지 매진은
-달력에 없고 조회 응답의 commercialFareFamilyList 에만 있다(KEBONUSPR.soldout).
-그래서 이 도구는 조회까지 가서 그 응답을 읽는다 - 예매는 하지 않는다(읽기 전용).
+왜 필요한가 (2026-09-02 실전):
+  09:00:03 프레스티지 1석 → 09:00:10 우리가 잠그려니 이미 사라짐.
+  "몇 초에 채이는가" 를 모르면 얼마나 더 빨라져야 하는지 알 수 없다.
 
-전용 탭 하나를 쓴다. 실전 매크로가 도는 탭과 겹치지 않게 --tab 을 다르게 준다.
-매 주기: 새로고침 -> 목표 날짜 선택 -> 항공편 검색 -> 조회 응답에서 좌석수 읽기.
+어떻게 재는가:
+  좌석 수는 7단계까지 안 가도 **조회 응답**에 있다
+  (awardAvailability → commercialFareFamilyList → KEBONUSPR.seatCount/soldout).
+  그래서 매크로의 1~2단계(날짜 클릭 + 검색)만 재생해 조회 화면에 도달한 뒤,
+  날짜 띠를 다시 눌러 재조회하며 좌석 수 변화를 기록한다.
 
+  첫 측정은 빨라야 09:00:03 쯤이다 - 새 날짜는 09:00:00 에야 고를 수 있고
+  조회 응답까지 3초쯤 걸린다. 그 이전은 구조적으로 못 본다.
+
+전제: dev-browser2.cmd (포트 9223, 별도 프로필) 가 떠 있고 계측용 계정으로 로그인됨.
 사용:
-  .venv/bin/python dev/watch_seats.py --route CDG --day 08-27 \
-      --setup-at 08:55 --date 2027-08-27 --from 08:59:55 --until 09:02
-
-주의: 실전 09:00 이 와야만 진짜로 검증된다. 그 전까지는 '어제 열린 날짜'로 형태만
-확인할 수 있다(그 날짜는 이미 매진이라 seatCount 변화는 안 보일 수 있다).
+  .venv/Scripts/python.exe dev/watch_seats.py --route FCO --date 08-28 --at 09:00
 """
 from __future__ import annotations
 import argparse, json, subprocess, sys, time
@@ -22,15 +26,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 USER = ROOT / "userscript" / "ke-award-macro.user.js"
 OUT = ROOT / "dev-shots"
-CDP = "http://localhost:9222"
 KST = timezone(timedelta(hours=9))
 
 
-def log(m): print(f"  [{datetime.now(KST).strftime('%H:%M:%S.%f')[:-3]}] {m}", flush=True)
+def log(m):
+    print(f"  [{datetime.now(KST).strftime('%H:%M:%S.%f')[:-3]}] {m}", flush=True)
 
 
 def wait_until(when: datetime) -> None:
-    # 한 번의 긴 sleep 은 절전 중 멈춘다. 벽시계를 계속 다시 보며 짧게 나눠 기다린다.
+    # 한 번의 긴 sleep 은 절전 중 멈춘다. 벽시계를 다시 보며 짧게 나눠 기다린다.
     while True:
         left = (when - datetime.now(KST)).total_seconds()
         if left <= 0.02:
@@ -47,146 +51,160 @@ def at(spec: str) -> datetime:
     return t if t > now else t + timedelta(days=1)
 
 
-# 한 주기: 목표 날짜를 골라 조회하고, 조회 응답에서 그 날 KEBONUSPR/일반석 좌석수를 읽는다.
-# 유저스크립트(KE_UTIL/KE_PROBE)가 주입돼 있어야 한다.
-READ = """(day) => {
+# 조회 화면에서 목표 날짜를 다시 눌러 재조회시킨다(페이지 이동 없이 그 자리에서).
+REPRESS = """(mmdd) => {
+  const U = window.KE_UTIL;
+  if (!U || !U.findStripDate) return 'no-util';
+  const c = U.findStripDate(mmdd);
+  if (!c) return 'no-strip';
+  U.fireClick(c);
+  return 'ok';
+}"""
+
+READ = """(cab) => {
   const P = window.KE_PROBE;
-  if (!P || !P.keCabin) return { err: 'no probe' };
-  const pr = P.keCabin('프레스티지', day);
-  const ey = P.keCabin('일반석', day);
-  return {
-    answered: P.answered ? P.answered() : false,
-    pr: pr, ey: ey,
-    // 원본 타임라인의 그날 KEBONUSPR 최신값(시각 포함)
-    tl: (P.seatTimeline() || []).filter(r => r.family === 'KEBONUSPR'
-          && (!day || r.date.slice(4,8) === day.replace('-',''))).slice(-3)
-  };
-}"""
-
-# 목표 날짜를 달력/날짜띠에서 찾아 누른 뒤, 항공편 검색을 누른다. 없으면 아직 안 열린 것.
-PICK = """(day) => {
-  const U = window.KE_UTIL;
-  if (!U) return { err: 'no util' };
-  let cell = U.findOpenDate ? U.findOpenDate('dep-fare-', day) : null;
-  if (!cell && U.findStripDate) cell = U.findStripDate(day);
-  if (!cell) return { picked: false, why: 'not-open' };
-  U.fireClick(cell);
-  return { picked: true };
-}"""
-
-SEARCH = """() => {
-  const b = document.querySelector('#flight-widget__btn');
-  if (b) { b.click(); return true; }
-  const U = window.KE_UTIL;
-  const c = U && U.candidates(document).find(e => U.visible(e) && /항공편\\s*검색/.test(U.label(e)));
-  if (c) { U.fireClick(c); return true; }
-  return false;
+  if (!P || !P.keCabin) return null;
+  return { pr: P.keCabin('프레스티지', cab), ey: P.keCabin('일반석', cab),
+           stamp: P.stamp() };
 }"""
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--route", default="CDG")
-    ap.add_argument("--day", required=True, help="지켜볼 날짜 MM-DD (예: 08-27)")
-    ap.add_argument("--tab", type=int, default=5, help="쓸 탭 번호 (실전 탭과 겹치지 않게)")
-    ap.add_argument("--setup-at", default="")
-    ap.add_argument("--date", default="", help="셋업용 날짜 YYYY-MM-DD")
-    ap.add_argument("--from", dest="start", default="+0s")
-    ap.add_argument("--until", default="+180s")
-    ap.add_argument("--gap", type=float, default=1.2, help="조회 사이 최소 간격(초, 서버 부담 하한)")
+    ap.add_argument("--route", required=True, help="도착지 코드 (FCO/CDG)")
+    ap.add_argument("--from", dest="origin", default="", help="출발지 코드 (유럽발이면 FCO 등)")
+    ap.add_argument("--date", required=True, help="지켜볼 출발일 MM-DD (그날 새로 열리는 날)")
+    ap.add_argument("--at", default="09:00", help="오픈 시각")
+    ap.add_argument("--lead", type=int, default=2500, help="선발사(ms)")
+    ap.add_argument("--until", type=int, default=90, help="오픈 후 몇 초까지 지켜볼지")
+    ap.add_argument("--gap", type=float, default=1.2, help="재조회 최소 간격(초, 서버 부담 하한)")
+    ap.add_argument("--port", type=int, default=9223, help="2번 크롬 포트")
+    ap.add_argument("--setup-at", default="", help="이 시각에 달력까지 준비 (예: 08:50)")
     a = ap.parse_args()
 
-    t_start, t_end = at(a.start), at(a.until)
-    rows = []
+    open_at = at(a.at)
+    fire_at = open_at - timedelta(milliseconds=a.lead)
+    end_at = open_at + timedelta(seconds=a.until)
+    rows: list = []
+    report = {"startedAt": datetime.now(KST).isoformat(), "route": a.route,
+              "origin": a.origin or "SEL", "date": a.date, "openAt": open_at.isoformat()}
 
+    # --- 준비: 달력까지 (계측용 크롬에서) ---
     if a.setup_at:
         wait_until(at(a.setup_at))
-        cmd = [sys.executable, str(ROOT / "dev" / "setup.py"), a.route, "--tab", str(a.tab)]
-        if a.date:
-            cmd += ["--date", a.date]
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        tail = (p.stdout or "").strip().splitlines()
-        try: st = json.loads(tail[-1]) if tail else {}
-        except Exception: st = {}
-        log(f"감시탭 셋업: {'OK' if st.get('ok') else st.get('why')}")
-        if not st.get("ok"):
-            return 2
+    yr = datetime.now(KST).year + (1 if int(a.date.split("-")[0]) < datetime.now(KST).month else 0)
+    cmd = [sys.executable, str(ROOT / "dev" / "setup.py"), a.route,
+           "--port", str(a.port), "--date", f"{yr}-{a.date}"]
+    if a.origin:
+        cmd += ["--from", a.origin]
+    log(f"달력 준비 ({a.origin or 'SEL'} -> {a.route}, {yr}-{a.date})")
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    tail = (r.stdout or "").strip().splitlines()
+    try: st = json.loads(tail[-1]) if tail else {}
+    except Exception: st = {}
+    if not st.get("ok"):
+        log(f"준비 실패: {st.get('why') or (r.stderr or '')[:100]}")
+        report["ok"] = False; report["why"] = st.get("why") or "달력 준비 실패"
+        OUT.mkdir(exist_ok=True)
+        (OUT / "watch_seats.json").write_text(json.dumps(report, ensure_ascii=False, indent=1),
+                                              encoding="utf-8")
+        return 2
+    log("달력 준비됨")
 
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
-        b = pw.chromium.connect_over_cdp(CDP)
+        b = pw.chromium.connect_over_cdp(f"http://localhost:{a.port}")
         ctx = b.contexts[0]
         js = USER.read_text(encoding="utf-8")
-        cals = [p for p in ctx.pages if "koreanair" in p.url]
-        if not cals:
-            log("감시할 대한항공 탭이 없다"); return 3
-        page = cals[-1]
-        log(f"감시 탭: {page.url[:70]}")
+        page = [p for p in ctx.pages if "koreanair" in p.url][-1]
+        try: page.bring_to_front()
+        except Exception: pass
+        page.evaluate(js)
 
-        w = (t_start - datetime.now(KST)).total_seconds()
-        if w > 0:
-            log(f"감시 시작까지 {w:.0f}초 대기 ({t_start:%H:%M:%S})")
-            wait_until(t_start)
+        # 매크로의 1~2단계(날짜 클릭 + 검색)만 재생한다. 예약 단계는 아예 싣지 않는다.
+        page.evaluate("""({date}) => {
+          const R = window.KE_REC, H = window.KE_HUD;
+          R.pause('watch'); R.state.playAfterReload = false;
+          R.loadBaked();
+          R.state.steps = R.state.steps.slice(0, 2);   // 날짜 + 검색 까지만
+          R.state.expectDate = date;
+          R.state.allowPay = false;
+          R.state.byCause = {}; R.state.problem = false; R.state.openReloads = 0;
+          R.reset(); R.save();
+          H.state.startAt = 'calendar'; H.state.armed = false; H.save();
+        }""", {"date": a.date})
 
-        log(f"감시 시작 - {a.day} 프레스티지 좌석수를 {t_end:%H:%M:%S} 까지 지켜본다")
+        wait = (fire_at - datetime.now(KST)).total_seconds()
+        if wait > 0:
+            log(f"{wait:.0f}초 대기 (발사 {fire_at.strftime('%H:%M:%S.%f')[:-3]})")
+            wait_until(fire_at)
+        log("발사 - 조회 화면으로")
+        t0 = time.time()
+        page.evaluate("() => window.KE_HUD.fire('watch')")
+
+        # 조회 화면에 도착할 때까지 (매크로가 날짜 클릭 + 검색을 한다)
+        seen_stamp = -1
         gone_at = None
-        seen_open = False
-        while datetime.now(KST) < t_end:
-            cyc = datetime.now(KST)
+        best_seats = None
+        while datetime.now(KST) < end_at:
             try:
-                page.reload(wait_until="domcontentloaded", timeout=40000)
+                if not page.evaluate("() => !!window.KE_REC"):
+                    page.evaluate(js)
+            except Exception:
+                time.sleep(0.2); continue
+            try:
+                d = page.evaluate(READ, a.date)
+            except Exception:
+                time.sleep(0.2); continue
+
+            if d and d.get("stamp") != seen_stamp and (d.get("pr") or d.get("ey")):
+                seen_stamp = d["stamp"]
+                pr, ey = d.get("pr") or {}, d.get("ey") or {}
+                now = datetime.now(KST)
+                secs = round((now - open_at).total_seconds(), 2)
+                row = {"at": now.isoformat(), "sinceOpen": secs,
+                       "prSeats": pr.get("seats"), "prSoldout": pr.get("soldout"),
+                       "prListed": pr.get("listed"), "eySeats": ey.get("seats"),
+                       "keFlights": pr.get("keFlights")}
+                rows.append(row)
+                mark = ""
+                if pr.get("listed") and not pr.get("soldout"):
+                    best_seats = max(best_seats or 0, pr.get("seats") or 0)
+                    mark = "  ★있음"
+                elif pr.get("soldout") and best_seats and not gone_at:
+                    gone_at = now
+                    mark = "  ← 방금 0 이 됨"
+                log(f"오픈+{secs:6.2f}s  프레스티지 "
+                    f"{'매진' if pr.get('soldout') else str(pr.get('seats')) + '석'}"
+                    f"  (일반석 {ey.get('seats')}){mark}")
+                if gone_at:
+                    break
+
+            # 재조회: 조회 화면이면 날짜 띠를 다시 누른다
+            try:
+                page.evaluate(REPRESS, a.date)
             except Exception:
                 pass
-            try: page.evaluate(js)
-            except Exception: pass
-            # 목표 날짜 선택 -> 검색
-            try:
-                pk = page.evaluate(PICK, a.day)
-                if pk.get("picked"):
-                    page.wait_for_timeout(300)
-                    page.evaluate(SEARCH)
-            except Exception:
-                pk = {"picked": False, "why": "err"}
-            # 조회 응답을 기다렸다가 읽는다
-            r = None
-            for _ in range(50):
-                page.wait_for_timeout(200)
-                try: r = page.evaluate(READ, a.day)
-                except Exception: continue
-                if r and r.get("answered") and (r.get("pr") or r.get("ey")):
-                    break
-            r = r or {}
-            stamp = datetime.now(KST)
-            pr = r.get("pr") or {}
-            ey = r.get("ey") or {}
-            row = {"at": stamp.isoformat(),
-                   "picked": pk.get("picked"), "why": pk.get("why"),
-                   "prSeats": pr.get("seats"), "prSoldout": pr.get("soldout"),
-                   "prListed": pr.get("listed"), "eySeats": ey.get("seats"),
-                   "keFlights": pr.get("keFlights")}
-            rows.append(row)
-            if pr.get("listed") and not pr.get("soldout"):
-                seen_open = True
-                log(f"{a.day} 프레스티지 {pr.get('seats')}석  (일반석 {ey.get('seats')})  ★열려있음")
-            elif pr.get("soldout"):
-                log(f"{a.day} 프레스티지 매진  (일반석 {ey.get('seats')})"
-                    + ("  <- 방금 닫힘" if seen_open and not gone_at else ""))
-                if seen_open and not gone_at:
-                    gone_at = stamp
-                    log(f"★ 프레스티지가 {stamp:%H:%M:%S.%f} 에 0 이 됐다"[:60])
-            else:
-                log(f"{a.day} 아직 조회 안됨 (picked={pk.get('picked')}, why={pk.get('why')})")
-            slept = (datetime.now(KST) - cyc).total_seconds()
-            if slept < a.gap:
-                time.sleep(a.gap - slept)
+            time.sleep(a.gap)
 
+        report.update(ok=True, rows=rows, maxPrestigeSeats=best_seats,
+                      goneAt=gone_at.isoformat() if gone_at else None,
+                      goneSinceOpen=round((gone_at - open_at).total_seconds(), 2) if gone_at else None,
+                      samples=len(rows))
         OUT.mkdir(exist_ok=True)
-        (OUT / "watch_seats.json").write_text(json.dumps(
-            {"day": a.day, "route": a.route,
-             "goneAt": gone_at.isoformat() if gone_at else None,
-             "sawOpen": seen_open, "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
+        (OUT / "watch_seats.json").write_text(json.dumps(report, ensure_ascii=False, indent=1),
+                                              encoding="utf-8")
+        # 날짜별로 쌓아 패턴이 보이게 한다
+        hist = OUT / "seat_history.jsonl"
+        with hist.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"day": datetime.now(KST).strftime("%Y-%m-%d"),
+                                "route": a.route, "origin": a.origin or "SEL",
+                                "date": a.date, "maxPrestigeSeats": best_seats,
+                                "goneSinceOpen": report.get("goneSinceOpen"),
+                                "samples": len(rows)}, ensure_ascii=False) + "\n")
         log(f"기록 {len(rows)}건 -> dev-shots/watch_seats.json"
-            + (f" / 프레스티지 0 전환 {gone_at:%H:%M:%S.%f}"[:40] if gone_at else ""))
+            + (f" / 프레스티지 최대 {best_seats}석" if best_seats else " / 프레스티지 못 봄")
+            + (f" / 오픈+{report['goneSinceOpen']}초에 0" if gone_at else ""))
         b.close()
     return 0
 
