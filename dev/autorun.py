@@ -82,6 +82,9 @@ def main() -> int:
     ap.add_argument("--cabin", default="프레스티지")
     ap.add_argument("--date", default="", help="목표 날짜 MM-DD (비우면 검사 안 함)")
     ap.add_argument("--dry", action="store_true", help="7단계(첫 주문) 앞에서 멈춘다")
+    # 시작 화면. calendar = 달력에서 새로고침(검증됨), departure = 조회 화면에서 시작
+    # (달력 한 장을 건너뛰어 앞단이 빨라질 수 있다는 가설. 실효를 재려고 넣었다).
+    ap.add_argument("--start", default="calendar", choices=["calendar", "departure"])
     ap.add_argument("--lead", type=int, default=2500,
                     help="선발사(ms). 오픈시각보다 이만큼 일찍 새로고침해 조회가 09:00 직후 도착하게 한다")
     a = ap.parse_args()
@@ -100,6 +103,8 @@ def main() -> int:
     setup_cmd = [sys.executable, str(ROOT / "dev" / "setup.py")] + ([a.route] if a.route else [])
     if a.origin:
         setup_cmd += ["--from", a.origin]
+    if a.start == "departure":
+        setup_cmd += ["--departure"]   # 달력이 아니라 조회 화면까지 가서 선다
     if a.date:
         mm, dd = a.date.split("-")
         yr = datetime.now(KST).year + (1 if int(mm) < datetime.now(KST).month else 0)
@@ -125,7 +130,7 @@ def main() -> int:
         except Exception: pass
         page.evaluate(js)
 
-        page.evaluate("""({cabin, date, dry}) => {
+        page.evaluate("""({cabin, date, dry, start}) => {
           const R = window.KE_REC, H = window.KE_HUD;
           R.pause('autorun'); R.state.playAfterReload = false;
           R.loadBaked();
@@ -135,9 +140,9 @@ def main() -> int:
           R.state.allowPay = !dry;
           R.state.byCause = {}; R.state.problem = false;
           R.reset(); R.save();
-          H.state.startAt = 'calendar';
+          H.state.startAt = start;
           H.state.armed = false;
-        }""", {"cabin": a.cabin, "date": a.date, "dry": a.dry})
+        }""", {"cabin": a.cabin, "date": a.date, "dry": a.dry, "start": a.start})
 
         # 선발사: 오픈시각보다 lead 만큼 일찍 새로고침한다. 페이지가 뜨는 데 ~2.5초가
         # 걸려서, 08:59:57.5 에 쏘면 조회가 09:00:01 경 (오픈 직후) 도착해 재고침을 피한다.
