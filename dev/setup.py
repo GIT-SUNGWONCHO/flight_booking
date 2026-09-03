@@ -422,31 +422,36 @@ def main() -> int:
                     page.wait_for_timeout(320)
                 log(f"  달 이동 {moved}회 -> 보이는 달 {seen} (목표 {head})")
 
-                got = page.evaluate("""({dy, head}) => {
+                # 달력은 두 달을 나란히 그린다. 보이는 날짜 전체에서 일자만 맞춰 첫 일치를
+                # 고르면 '왼쪽(이른 달)' 의 같은 일자를 집는다 - 2027-08-28(토) 을 달라고 했는데
+                # 2027-07-28(수) 을 골랐다(실측 2026-09-03). 그러면 그 날짜로 조회가 나가
+                # 운항일이 아니면 "정상적으로 처리되지 않았습니다" 로 끝난다.
+                # util.findPickerDate 는 #month{YYYYMM} 안에서만 찾으므로 달을 안 넘는다.
+                got = page.evaluate("""({mmdd, year}) => {
                   const U = window.KE_UTIL;
-                  const tds = U.candidates(document).filter(e => U.visible(e)
-                    && /ui-datepicker__td/.test((e.className||'').toString())
-                    && /-available/.test((e.className||'').toString()));
-                  // 라벨이 "25 25일, 수요일" 처럼 시작하므로 앞 숫자로 그 날을 고른다
-                  const hit = tds.find(e => new RegExp('^' + dy + '\\\\D').test(U.label(e).trim()));
-                  if (!hit) return null;
-                  U.fireClick(hit);
-                  return U.label(hit).replace(/\\s+/g,' ').slice(0,30);
-                }""", {"dy": str(int(dy)), "head": head})
+                  const r = U.findPickerDate ? U.findPickerDate(mmdd, year) : null;
+                  if (!r || !r.el || !r.available) return null;
+                  U.fireClick(r.el);
+                  return U.label(r.el).replace(/\\s+/g,' ').slice(0,30);
+                }""", {"mmdd": f"{int(mo):02d}-{int(dy):02d}", "year": int(y)})
                 # 그 날이 아직 안 열렸을 수 있다 (09:00 에 열리는 날을 08:50 에 세울 때가
                 # 그렇다). 여기서 필요한 것은 "달력이 그 달을 보여주는 것" 뿐이므로,
                 # 같은 달의 고를 수 있는 마지막 날로 대신한다.
                 if not got:
-                    got = page.evaluate("""() => {
+                    # 폴백도 '그 달 안' 에서 고른다. 전체에서 마지막을 집으면 오른쪽 달의
+                    # 엉뚱한 날로 새거나, 운항하지 않는 요일을 골라 조회가 실패한다.
+                    got = page.evaluate("""({year, mo}) => {
                       const U = window.KE_UTIL;
-                      const tds = U.candidates(document).filter(e => U.visible(e)
-                        && /ui-datepicker__td/.test((e.className||'').toString())
-                        && /-available/.test((e.className||'').toString()));
-                      if (!tds.length) return null;
-                      const t = tds[tds.length - 1];
+                      const box = document.getElementById('month' + year + mo);
+                      if (!box) return null;
+                      let tds; try { tds = box.querySelectorAll('td'); } catch (e) { return null; }
+                      const ok = [...tds].filter(t => U.visible(t)
+                        && (t.className||'').toString().indexOf('-available') !== -1);
+                      if (!ok.length) return null;
+                      const t = ok[ok.length - 1];
                       U.fireClick(t);
                       return U.label(t).replace(/\\s+/g,' ').slice(0,30);
-                    }""")
+                    }""", {"year": int(y), "mo": f"{int(mo):02d}"})
                     log(f"  목표일이 아직 없어 그 달 마지막 날로 대신: {got or '가능한 날 없음'}")
                 else:
                     log(f"  목표일 선택: {got}")
