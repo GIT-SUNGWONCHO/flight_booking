@@ -1,8 +1,9 @@
-# 전날 저녁 점검. 스케줄러가 매일 21:00 에 이것 하나를 실행한다.
+# 전날 사전점검. 스케줄러가 매일 16:00 에 이것 하나를 실행한다.
 #
-# 왜 아침이 아니라 저녁인가
+# 왜 아침이 아니라 전날 16:00 인가
 #   08:45 에 "로그인이 풀렸습니다" 를 알아봐야 고칠 시간이 15분이다. 사람이 자리에
-#   없으면 그냥 하루를 잃는다(2026-09-03). 전날 저녁이면 밤새 고칠 수 있다.
+#   없으면 그냥 하루를 잃는다(2026-09-03).
+#   16:00 은 사람이 PC 앞에 있는 시간이라 팝업을 실제로 본다. 밤에 걸면 아무도 안 본다.
 #
 # 무엇을 하나
 #   크롬 2개를 띄우고, 내일 노선으로 로그인·달력 화면까지 **실제로 세워본다.**
@@ -24,7 +25,7 @@ New-Item -ItemType Directory -Force $logDir | Out-Null
 function Say([string]$m) {
   $line = "[{0}] {1}" -f (Get-Date -Format "MM-dd HH:mm:ss"), $m
   Write-Output $line
-  Add-Content -Path (Join-Path $logDir "evening.log") -Value $line
+  Add-Content -Path (Join-Path $logDir "precheck.log") -Value $line
 }
 
 function Popup([string]$title, [string]$body) {
@@ -46,7 +47,7 @@ if ($h -ge [TimeSpan]::FromHours(7.5) -and $h -lt [TimeSpan]::FromHours(9.5)) {
   exit 0
 }
 
-Say "=== 전날 저녁 점검 시작 ==="
+Say "=== 전날 사전점검 시작 ==="
 
 if (-not $NoBrowsers) {
   & (Join-Path $PSScriptRoot "browsers.ps1") | ForEach-Object { Say "  $_" }
@@ -66,9 +67,9 @@ if ($ok) {
     $why = ($j.problems -join "`n")
   } catch { $why = "preflight.json 을 읽지 못했습니다" }
   Say "!!! 실패 - 팝업으로 알림"
-  Popup "내일 9시 준비 안 됨 (오늘 밤에 고쳐두세요)" `
-        ("내일 09:00 을 위한 점검이 실패했습니다.`n지금 고쳐두면 내일 아침은 그냥 돌아갑니다.`n`n" +
+  Popup "내일 9시 준비 안 됨 (오늘 안에 고쳐두세요)" `
+        ("내일 09:00 을 위한 사전점검이 실패했습니다.`n지금 고쳐두면 내일 아침은 그냥 돌아갑니다.`n`n" +
          "$why`n`n" +
-         "고친 뒤 확인:  pwsh -File dev\evening.ps1")
+         "고친 뒤 확인:  pwsh -File dev\precheck.ps1")
 }
-Say "=== 저녁 점검 끝 ==="
+Say "=== 사전점검 끝 ==="

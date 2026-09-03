@@ -47,7 +47,7 @@
     ./t.sh --gate         # 푸시 직전, 9시 결과에 직결되는 것만 (~3분)
     ./t.sh --all          # 전체 (~15분)
     dev/day.ps1           # 다음 09:00 에 무엇을 잴 것인가 - 노선은 여기 한 줄에서만 정한다
-    dev/evening.ps1       # 전날 저녁 점검 (스케줄 ke_evening 18:00) - 무거운 건 전부 여기서
+    dev/precheck.ps1      # 전날 16:00 사전점검 (스케줄 ke_precheck) - 무거운 건 전부 여기서
     dev/morning.ps1       # 아침 (스케줄 ke_morning 08:45) - 크롬 확인 20초 후 바로 측정
     dev/browsers.ps1      # 크롬 2개 (9222 실전 / 9223 계측)
 
