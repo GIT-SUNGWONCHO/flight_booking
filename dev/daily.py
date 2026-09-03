@@ -25,8 +25,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "dev-shots"
 KST = timezone(timedelta(hours=9))
-OFFSET = 360                 # 9시에 열리는 출발일 = 오늘 + 360일 (2026-09-02 실측)
-ROME_DAYS = {0, 2, 5}        # 월·수·토만 로마 운항 (양방향 동일, 실측)
+OFFSET = 360                 # FACTS: 오픈일 = 실행일 + 360일
+ROME_DAYS = {0, 2, 5}        # FACTS: 로마는 양방향 모두 월·수·토
 WD = ['월', '화', '수', '목', '금', '토', '일']
 
 
