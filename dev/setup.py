@@ -476,13 +476,55 @@ def main() -> int:
           if (b.length) U.fireClick(b[b.length-1]);
         }""")
         DEP = "/booking/select-award-flight"
-        goal = DEP if departure else CAL
+        # 마일리지 예매는 검색하면 '항상' 달력으로 간다. 조회 화면은 달력에서 날짜를
+        # 눌러야 도달한다 (실측 2026-09-03: '가까운 날짜 함께 조회' 를 꺼도 달력으로 갔다.
+        # 그 체크박스는 달력/조회를 가르는 스위치가 아니었다).
+        # 그래서 조회 화면이 목표면, 달력에 도착한 뒤 목표 날짜를 눌러 한 걸음 더 간다.
         for _ in range(60):
             time.sleep(0.5)
-            if goal in page.url: break
+            if CAL in page.url or DEP in page.url: break
         page.wait_for_timeout(6000)
         inject()
 
+        if departure and DEP not in page.url and CAL in page.url:
+            log("조회 화면으로: 달력에서 날짜를 누른다")
+            # 목표일이 달력 창에 없으면 '가장 최신 오픈일' 로 대신 들어간다.
+            # 조회 화면은 선택일 ±3일 날짜 띠를 들고 있으므로, 목표 근처에만 서면
+            # 띠에서 목표일을 집을 수 있다. 못 들어가는 것보다 훨씬 낫다.
+            picked = page.evaluate("""(want) => {
+              const U = window.KE_UTIL;
+              let cell = want ? U.findOpenDate('dep-fare-', want) : null;
+              let how = 'want';
+              if (!cell) { cell = U.findOpenDate('dep-fare-', ''); how = 'latest'; }
+              if (!cell) return null;
+              const lb = U.label(cell).replace(/\\s+/g, ' ').slice(0, 30);
+              U.fireClick(cell);
+              return how + ': ' + lb;
+            }""", want_date[5:] if want_date else "")
+            log(f"  누른 날짜: {picked or '못 찾음'}")
+            page.wait_for_timeout(2500)
+            # 날짜만 눌러서는 화면이 안 넘어간다. 달력 아래쪽 [검색] 을 눌러야 조회 화면으로
+            # 간다. 위젯의 [항공편 검색] 과 다른 버튼이다 - 달력에는 그 라벨이 없어서
+            # 그걸 찾다가 계속 실패했다(실측). 녹화된 2단계도 라벨이 '검색' 이다.
+            inject()
+            clicked = page.evaluate("""() => {
+              const U = window.KE_UTIL;
+              const pick = (lb) => U.candidates(document)
+                .filter(e => U.visible(e) && U.label(e).replace(/\\s+/g,' ').trim() === lb);
+              let b = pick('검색');
+              if (!b.length) b = pick('항공편 검색');
+              if (!b.length) return null;
+              U.fireClick(b[b.length - 1]);
+              return U.label(b[b.length - 1]).slice(0, 20);
+            }""")
+            log(f"  검색 버튼: {clicked or '못 찾음'}")
+            for _ in range(40):
+                time.sleep(0.5)
+                if DEP in page.url: break
+            page.wait_for_timeout(4000)
+            inject()
+
+        goal = DEP if departure else CAL
         ok = goal in page.url
         log((("조회" if departure else "달력") + (" 도착: " if ok else " 실패: ")) + page.url[:70])
         print(json.dumps({"ok": ok, "url": page.url,
