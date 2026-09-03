@@ -1,32 +1,22 @@
 # 아침 한 방. 08:45 에 스케줄러가 이것 하나만 실행한다.
 #
 #   1) 크롬 2개(9222 실전 / 9223 계측) 띄우기
-#   2) 사전 점검 - 로그인 확인 + 오늘 노선의 달력 화면까지 세워보기
-#      실패하면 화면에 팝업을 띄운다. 로그로만 남기면 사람이 못 본다.
-#   3) 측정 프로세스 시작 - 스스로 셋업하고 08:59:57.5 까지 대기했다가 발사
+#   2) 크롬이 살아 있나만 20초 확인 (--quick)
+#   3) 측정 시작 - 스스로 셋업하고 08:59:57.5 까지 대기했다가 발사
 #
-# 예전엔 08:45/08:47/08:50 세 개로 나눠 걸었는데 나눌 이유가 없었다.
-# 09:00 까지 15분이라 순서대로 해도 넉넉하다.
+# 무거운 점검은 여기 없다. 전날 저녁 evening.ps1 이 한다.
+# 08:45 에 "로그인이 풀렸습니다" 를 알아봐야 고칠 시간이 15분뿐이고, 그 점검이
+# 6분 53초를 잡아먹으면(09-03 리허설) 측정 셋업에 3분밖에 안 남는다.
+# 아침에 할 일은 '문제 찾기' 가 아니라 '9시에 대기 상태로 서 있기' 다.
 param(
   # 시험용. 측정 프로세스(09:00 까지 기다리는 부분)를 건너뛰고 준비까지만 본다.
   [switch]$NoDaily
 )
 $ErrorActionPreference = 'SilentlyContinue'
 
-# ─────────────────────────────────────────────────────────────
-#  오늘 무엇을 잴 것인가 — 여기 한 줄만 고친다.
-#
-#  비워두면 요일로 자동 판단한다 (열리는 날이 월·수·토면 로마, 아니면 파리).
-#  두 군데에 각각 적으면 사전점검과 측정이 서로 다른 화면을 잡는다. 그래서 한 곳이다.
-#
-#  2026-09-04 (금, 열리는 날 2027-08-30 월 = 로마 운항일):
-#    로마→인천(FCO→ICN). 9/9 실전과 같은 방향이라 이 방향으로 연습한다.
-#    로마는 월·수·토만 뜨므로 실전 전에 연습할 수 있는 날은 09-04 와 09-06 뿐이다.
-$DailyArgs = @('--route', 'ICN', '--from', 'FCO')
-# ─────────────────────────────────────────────────────────────
-
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+. (Join-Path $PSScriptRoot "day.ps1")      # $DailyArgs - 저녁 점검과 같은 파일을 읽는다
 $py = Join-Path $root ".venv\Scripts\python.exe"
 $logDir = Join-Path $root "dev-shots"
 New-Item -ItemType Directory -Force $logDir | Out-Null
@@ -51,54 +41,50 @@ function Popup([string]$title, [string]$body) {
 
 Say "=== 아침 준비 시작 ==="
 
+# 어젯밤 점검이 실제로 통과했는지 확인만 한다. 여기서 다시 점검하지는 않는다.
+$evWarn = ""
+try {
+  $j = Get-Content (Join-Path $logDir "preflight.json") -Raw | ConvertFrom-Json
+  $age = ((Get-Date) - [datetime]$j.at).TotalHours
+  if (-not $j.ok)      { $evWarn = "어젯밤 점검이 실패로 끝났습니다: " + ($j.problems -join '; ') }
+  elseif ($age -gt 20) { $evWarn = ("어젯밤 점검이 없습니다 (마지막 {0:N0}시간 전)" -f $age) }
+  else { Say ("어젯밤 점검 통과 확인 ({0} / {1} -> {2})" -f $j.at, $j.origin, $j.route) }
+} catch { $evWarn = "어젯밤 점검 기록을 읽지 못했습니다" }
+if ($evWarn) { Say ("주의: " + $evWarn) }
+
 # --- 1) 크롬 ---
 & (Join-Path $PSScriptRoot "browsers.ps1") | ForEach-Object { Say "  $_" }
 
-# --- 2) 사전 점검 ---
-# 사전 점검은 '아직 시간이 있을 때' 문제를 알려주려고 도는 것이다.
-# 09:00 을 위협할 만큼 끌면 목적을 잃는다. 08:55 에는 무슨 일이 있어도 측정을 시작한다.
-# (09-03 리허설: 두 포트가 각각 한 번씩 재시도해 6분 53초. 여유가 3분뿐이었다.)
-$mustStart = (Get-Date).Date.AddHours(8).AddMinutes(55)
-$budget = [int]($mustStart - (Get-Date)).TotalSeconds
-if ($budget -lt 60 -or $budget -gt 900) { $budget = 480 }   # 아침이 아닐 때(손으로 시험) 기본값
-
-Say ("사전 점검 (로그인 + 화면 세팅) - 최대 {0}초" -f $budget)
-# 측정과 같은 노선으로 점검해야 의미가 있다. 그래서 $DailyArgs 를 그대로 넘긴다.
-$preOut = Join-Path $logDir "preflight.out"
-$preTimedOut = $false
+# --- 2) 살아 있나 (20초) ---
+# 혹시 이것마저 멈추면 측정을 못 시작한다. 2분 넘기면 잘라내고 그냥 간다.
+Say "크롬 확인 (--quick)"
+$qOut = Join-Path $logDir "preflight_quick.out"
 $proc = Start-Process -FilePath $py -PassThru -NoNewWindow `
-        -ArgumentList (@((Join-Path $PSScriptRoot "preflight.py")) + $DailyArgs) `
-        -RedirectStandardOutput $preOut -RedirectStandardError (Join-Path $logDir "preflight.err")
-if ($proc.WaitForExit($budget * 1000)) {
-  $preOk = ($proc.ExitCode -eq 0)
+        -ArgumentList @((Join-Path $PSScriptRoot "preflight.py"), "--quick") `
+        -RedirectStandardOutput $qOut -RedirectStandardError (Join-Path $logDir "preflight_quick.err")
+if ($proc.WaitForExit(120000)) {
+  $qOk = ($proc.ExitCode -eq 0)
 } else {
-  # 자식(setup.py)까지 같이 죽여야 한다. 남아 있으면 같은 포트를 붙잡아 측정 셋업을 방해한다.
   & taskkill /T /F /PID $proc.Id 2>&1 | Out-Null
-  $preOk = $false; $preTimedOut = $true
+  $qOk = $false
 }
-Get-Content $preOut -ErrorAction SilentlyContinue | ForEach-Object { Say "  $_" }
+Get-Content $qOut -ErrorAction SilentlyContinue | ForEach-Object { Say "  $_" }
 
-if (-not $preOk) {
+if (-not $qOk) {
   $why = ""
-  if ($preTimedOut) {
-    $why = "사전 점검이 $budget 초 안에 끝나지 않아 중단했습니다.`n" +
-           "측정은 그대로 시작하며 스스로 셋업을 다시 시도합니다.`n" +
-           "두 크롬 창이 마일리지 달력 화면에 서 있는지 눈으로 확인해 주세요."
-  } else {
-    try {
-      $j = Get-Content (Join-Path $logDir "preflight.json") -Raw | ConvertFrom-Json
-      $why = ($j.problems -join "`n")
-    } catch { $why = "preflight.json 을 읽지 못했습니다" }
-  }
-  Say "!!! 사전 점검 실패 - 팝업으로 알림"
-  Popup "9시 준비 안 됨 (지금 손봐야 합니다)" `
-        ("9시까지 시간이 있습니다. 아래를 해결해 주세요:`n`n$why`n`n" +
-         "해결하면 08:50 경 자동 셋업이 다시 시도합니다.")
+  try {
+    $j = Get-Content (Join-Path $logDir "preflight_quick.json") -Raw | ConvertFrom-Json
+    $why = ($j.problems -join "`n")
+  } catch { $why = "크롬 확인이 끝나지 않았습니다" }
+  Say "!!! 크롬 확인 실패 - 팝업으로 알림"
+  Popup "9시 준비 - 크롬을 봐주세요" `
+        ("9시까지 시간이 있습니다.`n`n$why`n" + $(if($evWarn){"`n($evWarn)`n"}else{""}) + "`n" +
+         "측정은 그대로 시작하며 스스로 셋업을 다시 시도합니다.")
 } else {
-  Say "사전 점검 통과 - 9시 준비됨"
+  Say "크롬 OK"
 }
 
-# --- 3) 측정 (점검이 실패했어도 돌린다. 사람이 로그인만 고치면 자체 셋업이 살린다) ---
+# --- 3) 측정 (확인이 실패했어도 돌린다. 측정은 스스로 셋업한다) ---
 if ($NoDaily) {
   Say "(-NoDaily) 측정은 건너뜀 - 준비까지만 확인"
 } else {
