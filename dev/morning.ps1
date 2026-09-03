@@ -55,18 +55,41 @@ Say "=== 아침 준비 시작 ==="
 & (Join-Path $PSScriptRoot "browsers.ps1") | ForEach-Object { Say "  $_" }
 
 # --- 2) 사전 점검 ---
-Say "사전 점검 (로그인 + 화면 세팅)"
+# 사전 점검은 '아직 시간이 있을 때' 문제를 알려주려고 도는 것이다.
+# 09:00 을 위협할 만큼 끌면 목적을 잃는다. 08:55 에는 무슨 일이 있어도 측정을 시작한다.
+# (09-03 리허설: 두 포트가 각각 한 번씩 재시도해 6분 53초. 여유가 3분뿐이었다.)
+$mustStart = (Get-Date).Date.AddHours(8).AddMinutes(55)
+$budget = [int]($mustStart - (Get-Date)).TotalSeconds
+if ($budget -lt 60 -or $budget -gt 900) { $budget = 480 }   # 아침이 아닐 때(손으로 시험) 기본값
+
+Say ("사전 점검 (로그인 + 화면 세팅) - 최대 {0}초" -f $budget)
 # 측정과 같은 노선으로 점검해야 의미가 있다. 그래서 $DailyArgs 를 그대로 넘긴다.
-$pre = & $py (Join-Path $PSScriptRoot "preflight.py") @DailyArgs 2>&1
-$preOk = ($LASTEXITCODE -eq 0)
-$pre | ForEach-Object { Say "  $_" }
+$preOut = Join-Path $logDir "preflight.out"
+$preTimedOut = $false
+$proc = Start-Process -FilePath $py -PassThru -NoNewWindow `
+        -ArgumentList (@((Join-Path $PSScriptRoot "preflight.py")) + $DailyArgs) `
+        -RedirectStandardOutput $preOut -RedirectStandardError (Join-Path $logDir "preflight.err")
+if ($proc.WaitForExit($budget * 1000)) {
+  $preOk = ($proc.ExitCode -eq 0)
+} else {
+  # 자식(setup.py)까지 같이 죽여야 한다. 남아 있으면 같은 포트를 붙잡아 측정 셋업을 방해한다.
+  & taskkill /T /F /PID $proc.Id 2>&1 | Out-Null
+  $preOk = $false; $preTimedOut = $true
+}
+Get-Content $preOut -ErrorAction SilentlyContinue | ForEach-Object { Say "  $_" }
 
 if (-not $preOk) {
   $why = ""
-  try {
-    $j = Get-Content (Join-Path $logDir "preflight.json") -Raw | ConvertFrom-Json
-    $why = ($j.problems -join "`n")
-  } catch { $why = "preflight.json 을 읽지 못했습니다" }
+  if ($preTimedOut) {
+    $why = "사전 점검이 $budget 초 안에 끝나지 않아 중단했습니다.`n" +
+           "측정은 그대로 시작하며 스스로 셋업을 다시 시도합니다.`n" +
+           "두 크롬 창이 마일리지 달력 화면에 서 있는지 눈으로 확인해 주세요."
+  } else {
+    try {
+      $j = Get-Content (Join-Path $logDir "preflight.json") -Raw | ConvertFrom-Json
+      $why = ($j.problems -join "`n")
+    } catch { $why = "preflight.json 을 읽지 못했습니다" }
+  }
   Say "!!! 사전 점검 실패 - 팝업으로 알림"
   Popup "9시 준비 안 됨 (지금 손봐야 합니다)" `
         ("9시까지 시간이 있습니다. 아래를 해결해 주세요:`n`n$why`n`n" +

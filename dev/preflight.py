@@ -99,7 +99,10 @@ def main() -> int:
             log(f"  {tag}({port}): 크롬 없음")
             continue
 
-        log(f"  {tag}({port}): 크롬 OK / 로그인 {'OK' if info['loggedIn'] else '안 됨'}")
+        # 갓 띄운 크롬은 헤더(shadow DOM)가 아직 안 그려져 로그인돼 있어도 false 로 읽힌다.
+        # 그래서 여기서는 단정하지 않는다. 진짜 판정은 아래 setup 이 한다.
+        log(f"  {tag}({port}): 크롬 OK / 로그인 "
+            f"{'OK' if info['loggedIn'] else '아직 확인 안 됨 (셋업에서 다시 본다)'}")
 
         # 2) 달력까지 세운다. setup 은 로그아웃이면 네이버 연동을 스스로 시도한다.
         cmd = [sys.executable, str(ROOT / "dev" / "setup.py"), route,
