@@ -43,6 +43,32 @@ def day_args() -> list[str]:
         return []
 
 
+ROME_DAYS = {0, 2, 5}      # FACTS: 로마는 양방향 모두 월·수·토
+
+
+def open_target(args: list[str]):
+    """리허설이 쏠 출발일 = '이미 열려 있는' 가장 최신 날짜.
+
+    08:20 에 도는 리허설은 오늘 09:00 에 열릴 날짜를 쓸 수 없다. 아직 없다.
+    (09-04 아침에 이걸 놓칠 뻔했다 - 없는 날짜로 쏘면 리허설이 엉뚱하게 실패한다.)
+
+    오픈 규칙: 출발일 = 실행일 + 360. 그러니 09:00 전이면 오늘+359 가 최신이고,
+    09:00 이 지났으면 오늘+360 이 최신이다.
+
+    로마(FCO)는 월·수·토만 뜨므로 그 날이 아니면 뒤로 물러선다. 운항 안 하는 날로
+    쏘면 매크로가 정상적으로 실패하는데 리허설은 그걸 고장으로 읽는다.
+    """
+    now = datetime.now(KST)
+    d = now.date() + timedelta(days=360 if now.hour >= 9 else 359)
+    joined = " ".join(args).upper()
+    if "FCO" in joined:
+        for _ in range(7):
+            if d.weekday() in ROME_DAYS:
+                break
+            d -= timedelta(days=1)
+    return d
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=int, default=9, help="지금부터 몇 분 뒤에 발사할까")
@@ -72,10 +98,12 @@ def main() -> int:
         try: (OUT / f).unlink()
         except Exception: pass
 
+    tgt = open_target(args)
     fire = datetime.now(KST) + timedelta(minutes=a.minutes)
-    log(f"발사 예정 {fire.strftime('%H:%M:%S')} (지금+{a.minutes}분) / dry")
+    log(f"발사 예정 {fire.strftime('%H:%M:%S')} (지금+{a.minutes}분) / 출발일 {tgt} / dry")
     cmd = [sys.executable, str(ROOT / "dev" / "daily.py")] + args + \
-          ["--at", f"+{a.minutes * 60}s", "--setup-at", "+5s"]
+          ["--at", f"+{a.minutes * 60}s", "--setup-at", "+5s",
+           "--date", tgt.strftime("%m-%d")]
     r = subprocess.run(cmd, capture_output=True, text=True,
                        timeout=(a.minutes + 8) * 60)
     print(r.stdout[-3000:])

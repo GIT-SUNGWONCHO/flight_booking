@@ -1,15 +1,19 @@
-# 아침 한 방. 08:45 에 스케줄러가 이것 하나만 실행한다.
+# 아침 한 방. 08:20 에 스케줄러가 이것 하나를 실행한다.
 #
-#   1) 크롬 2개(9222 실전 / 9223 계측) 띄우기
-#   2) 크롬이 살아 있나만 20초 확인 (--quick)
-#   3) 측정 시작 - 스스로 셋업하고 08:59:57.5 까지 대기했다가 발사
+#   08:20  리허설 - 크롬을 죽이고 새로 띄운 뒤, 9시에 도는 것과 같은 진입점으로
+#          이미 열린 날짜에 dry 발사까지 해본다. 실패하면 팝업 (40분 남는다).
+#   ~08:32 실전 셋팅 - 두 크롬을 마일리지 달력에 세운다.
+#   08:50  준비 확인 - 정말로 보너스 달력에 서 있는지 눈으로 본다. 아니면 팝업.
+#   09:00  발사 (08:59:57.5 선발사)
 #
-# 무거운 점검은 여기 없다. 전날 16:00 precheck.ps1 이 한다.
-# 08:45 에 "로그인이 풀렸습니다" 를 알아봐야 고칠 시간이 15분뿐이고, 그 점검이
-# 6분 53초를 잡아먹으면(09-03 리허설) 측정 셋업에 3분밖에 안 남는다.
-# 아침에 할 일은 '문제 찾기' 가 아니라 '9시에 대기 상태로 서 있기' 다.
+# 왜 아침에 리허설을 하나
+#   09-04 에 09:00 을 통째로 잃었다. 원인은 '로그인 직후 위젯이 현금 모드로 남는 것'
+#   이었는데, KE 세션 쿠키는 크롬을 끄면 사라지므로 **PC 를 껐다 켠 아침에만**
+#   로그인이 필요하고 그때만 터졌다. 전날 16:00 리허설은 크롬이 켜져 있어
+#   로그인 단계를 안 타고 늘 통과했다.
+#   그래서 시험은 반드시 아침에, 차가운 크롬에서, 로그인부터 해야 한다.
 param(
-  # 시험용. 측정 프로세스(09:00 까지 기다리는 부분)를 건너뛰고 준비까지만 본다.
+  # 시험용. 리허설만 하고 실전 셋팅/발사는 건너뛴다.
   [switch]$NoDaily
 )
 $ErrorActionPreference = 'SilentlyContinue'
@@ -21,7 +25,7 @@ $env:PYTHONIOENCODING = 'utf-8'
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
-. (Join-Path $PSScriptRoot "day.ps1")      # $DailyArgs - 저녁 점검과 같은 파일을 읽는다
+. (Join-Path $PSScriptRoot "day.ps1")      # $DailyArgs
 $py = Join-Path $root ".venv\Scripts\python.exe"
 $logDir = Join-Path $root "dev-shots"
 New-Item -ItemType Directory -Force $logDir | Out-Null
@@ -44,57 +48,44 @@ function Popup([string]$title, [string]$body) {
   }
 }
 
-Say "=== 아침 준비 시작 ==="
+Say "=== 아침 시작 ==="
 
-# 어젯밤 점검이 실제로 통과했는지 확인만 한다. 여기서 다시 점검하지는 않는다.
-$evWarn = ""
-try {
-  $j = Get-Content (Join-Path $logDir "preflight.json") -Raw | ConvertFrom-Json
-  $age = ((Get-Date) - [datetime]$j.at).TotalHours
-  if (-not $j.ok)      { $evWarn = "어젯밤 점검이 실패로 끝났습니다: " + ($j.problems -join '; ') }
-  elseif ($age -gt 20) { $evWarn = ("어젯밤 점검이 없습니다 (마지막 {0:N0}시간 전)" -f $age) }
-  else { Say ("어젯밤 점검 통과 확인 ({0} / {1} -> {2})" -f $j.at, $j.origin, $j.route) }
-} catch { $evWarn = "어젯밤 점검 기록을 읽지 못했습니다" }
-if ($evWarn) { Say ("주의: " + $evWarn) }
-
-# --- 1) 크롬 ---
-& (Join-Path $PSScriptRoot "browsers.ps1") | ForEach-Object { Say "  $_" }
-
-# --- 2) 살아 있나 (20초) ---
-# 혹시 이것마저 멈추면 측정을 못 시작한다. 2분 넘기면 잘라내고 그냥 간다.
-Say "크롬 확인 (--quick)"
-$qOut = Join-Path $logDir "preflight_quick.out"
+# --- 1) 리허설: 차가운 크롬 -> 로그인 -> 발사까지 ---
+# 여기서 크롬을 죽이고 새로 띄우므로 browsers.ps1 을 따로 부르지 않는다.
+Say ("리허설 (" + ($DailyArgs -join ' ') + ") - 크롬 죽이고 새로, 이미 열린 날짜로 dry 발사")
+$rOut = Join-Path $logDir "rehearse.out"
 $proc = Start-Process -FilePath $py -PassThru -NoNewWindow `
-        -ArgumentList @((Join-Path $PSScriptRoot "preflight.py"), "--quick") `
-        -RedirectStandardOutput $qOut -RedirectStandardError (Join-Path $logDir "preflight_quick.err")
-if ($proc.WaitForExit(120000)) {
-  $qOk = ($proc.ExitCode -eq 0)
+        -ArgumentList (@((Join-Path $PSScriptRoot "rehearse.py"), "--minutes", "8") + $DailyArgs) `
+        -RedirectStandardOutput $rOut -RedirectStandardError (Join-Path $logDir "rehearse.err")
+# 리허설은 12분이면 끝난다. 20분을 넘기면 실전 셋팅 시간을 먹으므로 잘라낸다.
+if ($proc.WaitForExit(20 * 60 * 1000)) {
+  $rOk = ($proc.ExitCode -eq 0)
 } else {
   & taskkill /T /F /PID $proc.Id 2>&1 | Out-Null
-  $qOk = $false
+  $rOk = $false
 }
-Get-Content $qOut -ErrorAction SilentlyContinue | ForEach-Object { Say "  $_" }
+Get-Content $rOut -ErrorAction SilentlyContinue | ForEach-Object { Say "  $_" }
 
-if (-not $qOk) {
-  $why = ""
-  try {
-    $j = Get-Content (Join-Path $logDir "preflight_quick.json") -Raw | ConvertFrom-Json
-    $why = ($j.problems -join "`n")
-  } catch { $why = "크롬 확인이 끝나지 않았습니다" }
-  Say "!!! 크롬 확인 실패 - 팝업으로 알림"
-  Popup "9시 준비 - 크롬을 봐주세요" `
-        ("9시까지 시간이 있습니다.`n`n$why`n" + $(if($evWarn){"`n($evWarn)`n"}else{""}) + "`n" +
-         "측정은 그대로 시작하며 스스로 셋업을 다시 시도합니다.")
+if ($rOk) {
+  Say "리허설 통과 - 실전 셋팅으로 넘어간다"
 } else {
-  Say "크롬 OK"
+  $why = ($rOut | Get-Content -ErrorAction SilentlyContinue |
+          Select-String '^\s+X ' | ForEach-Object { $_.ToString().Trim() }) -join "`n"
+  if (-not $why) { $why = "리허설이 끝나지 않았거나 로그를 읽지 못했습니다" }
+  Say "!!! 리허설 실패 - 팝업"
+  Popup "9시 리허설 실패 (지금 손봐야 합니다)" `
+        ("09:00 까지 시간이 있습니다. 아래가 안 됐습니다:`n`n$why`n`n" +
+         "실전 셋팅은 그대로 진행합니다. 08:50 에 한 번 더 확인합니다.`n" +
+         "자세한 로그: dev-shots\rehearse.out / setup_failures.log")
 }
 
-# --- 3) 측정 (확인이 실패했어도 돌린다. 측정은 스스로 셋업한다) ---
+# --- 2) 실전 셋팅 + 08:50 준비 확인 + 09:00 발사 ---
+# 리허설이 실패했어도 돌린다. 사람이 그 사이에 고칠 수 있고, 셋업은 스스로 재시도한다.
 if ($NoDaily) {
-  Say "(-NoDaily) 측정은 건너뜀 - 준비까지만 확인"
+  Say "(-NoDaily) 실전 셋팅은 건너뜀 - 리허설만 확인"
 } else {
-  Say ("측정 프로세스 시작 (" + ($DailyArgs -join ' ') + ") - 스스로 셋업 후 08:59:57.5 발사")
-  & $py (Join-Path $PSScriptRoot "daily.py") @DailyArgs 2>&1 |
+  Say ("실전 셋팅 시작 (" + ($DailyArgs -join ' ') + ") - 08:50 준비 확인, 08:59:57.5 발사")
+  & $py (Join-Path $PSScriptRoot "daily.py") @DailyArgs --ready-by 08:50 2>&1 |
     ForEach-Object { Say "  $_" }
 }
 Say "=== 아침 끝 (결과는 dev-shots 참고) ==="

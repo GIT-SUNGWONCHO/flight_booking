@@ -34,6 +34,58 @@ def log(m):
     print(f"[{datetime.now(KST).strftime('%H:%M:%S')}] {m}", flush=True)
 
 
+def popup(title: str, body: str):
+    """스케줄러는 창을 숨기고 돌린다. 문제가 생기면 이렇게라도 눈에 띄게 한다."""
+    import ctypes, threading
+    threading.Thread(target=lambda: ctypes.windll.user32.MessageBoxW(
+        0, body, title, 0x30), daemon=True).start()
+
+
+def ready_checkpoint(hhmm: str, ports: list):
+    """약속한 시각에 '정말로 발사할 수 있는 상태인가' 를 눈으로 확인한다.
+
+    09-04 에 두 크롬이 현금 달력(/booking/calendar-fare)에 서 있었는데 아무도
+    몰랐다. 프로세스는 이미 죽어 있었고 로그는 09:01 에야 나왔다.
+    보너스 달력(calendar-fare-bonus)이 아니면 그 자리에서 사람을 부른다.
+    """
+    now = datetime.now(KST)
+    h, m = (hhmm.split(":") + ["0"])[:2]
+    t = now.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
+    if t > now:
+        log(f"{t.strftime('%H:%M')} 준비 확인까지 대기")
+        time.sleep((t - now).total_seconds())
+    bad = []
+    try:
+        from playwright.sync_api import sync_playwright
+        for port in ports:
+            try:
+                with sync_playwright() as pw:
+                    b = sync_cdp(pw, port)
+                    url = b.contexts[0].pages[-1].url if b.contexts[0].pages else ""
+                    b.close()
+            except Exception as e:
+                url = f"(붙지 못함: {str(e)[:40]})"
+            ok = "calendar-fare-bonus" in url
+            log(f"  준비확인 {port}: {'OK' if ok else 'X'}  {url[:70]}")
+            if not ok:
+                bad.append(f"{port}: {url[:70]}")
+    except Exception as e:
+        bad.append(f"확인 자체가 실패: {str(e)[:60]}")
+    if bad:
+        log("!!! 준비 안 됨 - 팝업")
+        popup("9시 준비 안 됨 (지금 손봐야 합니다)",
+              "마일리지 달력에 서 있지 않습니다:\n\n"
+              + "\n".join(bad)
+              + "\n\n9시까지 시간이 있습니다."
+                "\n그 창에서 마일리지 예매로 들어가 주세요.")
+    else:
+        log("준비 확인 통과 - 두 크롬 모두 마일리지 달력")
+
+
+def sync_cdp(pw, port: int):
+    return pw.chromium.connect_over_cdp(f"http://localhost:{port}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--at", default="09:00")
@@ -44,6 +96,10 @@ def main() -> int:
     ap.add_argument("--port2", type=int, default=9223)
     ap.add_argument("--no-macro", action="store_true", help="계측기만 돌린다")
     ap.add_argument("--no-watch", action="store_true", help="매크로만 돌린다")
+    # 리허설용. 08:20 에는 오늘 열릴 날짜가 아직 없어 그 날짜로는 못 쏜다.
+    # 이미 열린 최신일을 넣어 파이프라인만 확인한다.
+    ap.add_argument("--date", default="", help="MM-DD 강제 (비우면 오늘+360)")
+    ap.add_argument("--ready-by", default="", help="이 시각에 두 크롬이 보너스 달력에 서 있는지 확인 (HH:MM)")
     a = ap.parse_args()
 
     today = datetime.now(KST).date()
@@ -59,7 +115,7 @@ def main() -> int:
     else:
         route, origin = "CDG", ""         # 인천 -> 파리 (9/14 목표 방향)
 
-    mmdd = opens.strftime("%m-%d")
+    mmdd = a.date or opens.strftime("%m-%d")
     log(f"오늘 {today}({WD[today.weekday()]}) 9시에 열리는 날: "
         f"{opens}({WD[opens.weekday()]})  로마운항={'O' if rome_ok else 'X'}")
     log(f"측정 노선: {origin or 'SEL'} -> {route}  (출발일 {mmdd})")
@@ -82,6 +138,9 @@ def main() -> int:
         procs["macro"] = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                           stderr=subprocess.STDOUT, text=True)
         log("dry 매크로 시작 (1번 크롬, 주문 안 만듦)")
+
+    if a.ready_by:
+        ready_checkpoint(a.ready_by, [9222, a.port2])
 
     outs = {}
     for name, p in procs.items():

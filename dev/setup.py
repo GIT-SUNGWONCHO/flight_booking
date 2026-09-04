@@ -82,6 +82,8 @@ def main() -> int:
             try: page.evaluate(js)
             except Exception: pass
 
+        did_login = False
+
         # 이미 달력이면 끝 (도착지를 바꿔야 하면 그대로 진행한다)
         if goal_now(page.url, departure) and not want:
             inject()
@@ -116,6 +118,7 @@ def main() -> int:
             # 있으면 버튼 두 번으로 끝난다 - 비밀번호를 치는 게 아니다.
             # 비밀번호 입력칸이 뜨면 거기서 멈춘다. 그건 사람이 해야 한다.
             log("로그아웃 상태 - 네이버 연동으로 다시 로그인 시도")
+            did_login = True
             page.evaluate("""() => {
               const U = window.KE_UTIL;
               const b = U.candidates(document).find(e => U.visible(e) && /^로그인$/.test(U.label(e)));
@@ -158,6 +161,24 @@ def main() -> int:
             print(json.dumps({"ok": False, "url": page.url, "why": "로그인 필요"}, ensure_ascii=False))
             return 2
         log("로그인 확인됨")
+
+        if did_login:
+            # 로그인 직후의 위젯은 '마일리지 예매' 를 눌러도 붙지 않는다.
+            # click 은 요소를 찾아 누르므로 '성공' 이라고 찍히는데, 검색은 현금
+            # 달력(/booking/calendar-fare)으로 간다. 좌석등급도 일반석, 값도 원화다.
+            #
+            # 09-04 실측으로 확정: 완전히 새 크롬에서
+            #   1차(로그인 있음) -> calendar-fare      실패
+            #   2차(로그인 없음) -> calendar-fare-bonus 성공
+            # 두 실행의 차이는 이 로그인 단계 하나뿐이었다.
+            #
+            # 재부팅한 아침에만 로그인이 필요하므로, 정확히 실전에서만 터졌다.
+            # 09-04 09:00 을 이것으로 통째로 잃었다.
+            log("로그인 직후라 홈을 다시 연다 (위젯이 현금 모드로 남는다)")
+            page.goto("https://www.koreanair.com/kr/ko",
+                      wait_until="load", timeout=60000)
+            page.wait_for_timeout(8000)
+            inject()
 
         # 위젯의 토글들은 클릭 가능 목록에 안 걸리는 SPAN/LABEL 이라 직접 훑는다.
         CLICK_TEXT = """(txt) => {
