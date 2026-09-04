@@ -29,6 +29,9 @@ import argparse, json, subprocess, sys, time, traceback
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ke_setup import run_setup
+
 ROOT = Path(__file__).resolve().parent.parent
 USER = ROOT / "userscript" / "ke-award-macro.user.js"
 OUT = ROOT / "dev-shots"
@@ -178,12 +181,9 @@ def main() -> int:
     if a.origin:
         cmd += ["--from", a.origin]
     log(f"달력 준비 ({a.origin or 'SEL'} -> {a.route}, 목표 {tgt})")
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        tail = (r.stdout or "").strip().splitlines()
-        st = json.loads(tail[-1]) if tail else {}
-    except Exception as e:
-        st = {"ok": False, "why": f"setup 실패: {e}"[:90]}
+    # 한 번 실패했다고 하루를 버리지 않는다. 발사 90초 전까지 다시 해본다.
+    # (09-04: 새 크롬에서 1차 실패하고 그대로 죽어 09:00 을 통째로 놓쳤다)
+    st = run_setup(cmd, open_at - timedelta(seconds=90), log)
     if not st.get("ok"):
         report["why"] = f"조회 화면 준비 실패: {st.get('why')}"
         log(report["why"]); save_report(); return 2

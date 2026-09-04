@@ -14,6 +14,9 @@ import argparse, json, subprocess, sys, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ke_setup import run_setup
+
 ROOT = Path(__file__).resolve().parent.parent
 USER = ROOT / "userscript" / "ke-award-macro.user.js"
 OUT = ROOT / "dev-shots"
@@ -109,14 +112,12 @@ def main() -> int:
         mm, dd = a.date.split("-")
         yr = datetime.now(KST).year + (1 if int(mm) < datetime.now(KST).month else 0)
         setup_cmd += ["--date", f"{yr}-{mm}-{dd}"]
-    r = subprocess.run(setup_cmd, capture_output=True, text=True, timeout=420)
-    tail = (r.stdout or "").strip().splitlines()
-    try:
-        st = json.loads(tail[-1]) if tail else {}
-    except Exception:
-        st = {}
+    # 한 번 실패했다고 하루를 버리지 않는다. 발사 90초 전까지 다시 해본다.
+    # (09-04: 새 크롬에서 1차 실패하고 그대로 죽어 09:00 을 통째로 놓쳤다.
+    #  이 사실은 FACTS 에 있었는데 재시도를 preflight 에만 넣어 두었다.)
+    st = run_setup(setup_cmd, fire_at - timedelta(seconds=90), log)
     if not st.get("ok"):
-        return finish(False, f"달력 준비 실패: {st.get('why') or (r.stderr or '')[:80]}", 2)
+        return finish(False, f"달력 준비 실패: {st.get('why')}", 2)
     log("달력 준비됨")
 
     from playwright.sync_api import sync_playwright

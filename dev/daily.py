@@ -37,7 +37,8 @@ def log(m):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--at", default="09:00")
-    ap.add_argument("--setup-at", default="08:52")
+    # 셋업이 실패하면 다시 해봐야 한다. 08:52 면 재시도 시간이 없다. (09-04)
+    ap.add_argument("--setup-at", default="08:40")
     ap.add_argument("--route", default="", help="비우면 요일로 자동 (월수토=FCO, 그 외=CDG)")
     ap.add_argument("--from", dest="origin", default="", help="유럽발이면 FCO/CDG")
     ap.add_argument("--port2", type=int, default=9223)

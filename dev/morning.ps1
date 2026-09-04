@@ -14,6 +14,11 @@ param(
 )
 $ErrorActionPreference = 'SilentlyContinue'
 
+# 파이썬 자식 프로세스의 한글이 로그에서 깨지지 않게. PowerShell 은 자식 출력을
+# 콘솔 OEM 코드페이지(949)로 디코드하는데 파이썬은 UTF-8 로 쓴다. (09-04 실측)
+$env:PYTHONIOENCODING = 'utf-8'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 . (Join-Path $PSScriptRoot "day.ps1")      # $DailyArgs - 저녁 점검과 같은 파일을 읽는다
