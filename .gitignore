@@ -1,4 +1,11 @@
 config.yaml
+
+# 계정 비밀번호. 이 저장소는 GitHub 로 푸시된다 - 절대 커밋하지 않는다.
+# 형식만 .env.example 에 두고, 실제 값은 .env 에만 둔다.
+.env
+.env.*
+!.env.example
+
 profile/
 .test-profile*/
 .debug-profile*/

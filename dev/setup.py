@@ -27,6 +27,141 @@ CAL = "/booking/calendar-fare-bonus"
 def log(m): print(f"  {m}", flush=True)
 
 
+def load_env() -> dict:
+    """저장소 루트의 .env 를 읽는다. 없으면 빈 dict.
+
+    비밀번호는 여기에만 있고 저장소에는 절대 안 들어간다(.gitignore).
+    값을 로그에 찍지 않는다 - 있다/없다만 말한다.
+    """
+    env = {}
+    f = ROOT / ".env"
+    if not f.exists():
+        return env
+    for line in f.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        v = v.strip().strip('"').strip("'")
+        if v:
+            env[k.strip()] = v
+    return env
+
+
+def login_naver(page, inject) -> bool:
+    """네이버 연동으로 로그인한다 (9223 본인 계정).
+
+    네이버 쪽 세션(NID_AUT/NID_SES)이 살아 있으면 버튼 두 번으로 끝난다 -
+    비밀번호를 치는 게 아니다. 네이버가 비밀번호를 물으면 사람이 해야 한다.
+    """
+    page.evaluate("""() => {
+      const U = window.KE_UTIL;
+      const b = U.candidates(document).find(e => U.visible(e) && /^로그인$/.test(U.label(e)));
+      if (b) U.fireClick(b);
+    }""")
+    page.wait_for_timeout(6000)
+    inject()
+    page.evaluate("""() => {
+      const U = window.KE_UTIL;
+      const b = U.candidates(document).find(e => U.visible(e) && /네이버|NAVER/i.test(U.label(e)));
+      if (b) U.fireClick(b);
+    }""")
+    for _ in range(16):
+        page.wait_for_timeout(2500)
+        try:
+            # 대한항공 /login 페이지에도 자체 아이디·비밀번호 칸이 있다.
+            # 그걸 보고 멈추면 네이버로 넘어가기도 전에 포기한다 (실측:
+            # 그래서 자동 로그인이 실패했다). 네이버 화면에서 물을 때만 멈춘다.
+            if "naver" in page.url and page.evaluate("""() => {
+              const es = document.querySelectorAll('input[type=password]');
+              for (const e of es) { const r = e.getBoundingClientRect();
+                if (r.width > 1 && r.height > 1) return true; }
+              return false;
+            }"""):
+                log("네이버가 비밀번호를 요구합니다 - 사람이 로그인해야 함")
+                return False
+            if "koreanair" in page.url:
+                inject()
+                if page.evaluate("""() => {
+                  const U = window.KE_UTIL;
+                  return U.candidates(document).some(e => U.visible(e) && /로그아웃/.test(U.label(e)));
+                }"""):
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def login_idpw(page, inject, user: str, pw: str, tab: str = "") -> bool:
+    """대한항공 자체 로그인 (9222 와이프 계정).
+
+    **로그인 화면에는 탭이 두 개다** - `아이디` / `스카이패스 번호`.
+    기본은 `아이디` 탭이라, 스카이패스 번호를 그냥 넣으면
+    "일치하는 회원정보가 없습니다" 가 뜬다. (09-04 실측으로 확인)
+
+    탭은 `button[role=tab]` 이고 고른 것에 `aria-selected=true` 와 `-active` 가 붙는다.
+    입력칸의 id 는 매번 바뀌는 해시(textinput-051db3f4...)라 잡으면 안 된다.
+    보이는 text/password 칸이 각각 하나뿐이라 타입으로 잡는다.
+
+    tab  "스카이패스" 또는 "아이디". 비우면 값이 숫자뿐일 때 스카이패스로 본다.
+    """
+    if "/login" not in page.url:
+        page.goto("https://www.koreanair.com/login",
+                  wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)
+        inject()
+
+    want = tab or ("스카이패스" if user.isdigit() else "아이디")
+    picked = page.evaluate("""(want) => {
+      const tabs = [...document.querySelectorAll('button[role=tab]')]
+        .filter(e => { const r = e.getBoundingClientRect(); return r.width > 1; });
+      const hit = tabs.find(e => (e.innerText || '').replace(/\\s+/g, ' ').includes(want));
+      if (!hit) return 'tab못찾음:' + tabs.map(e => (e.innerText||'').trim()).join('/');
+      if (hit.getAttribute('aria-selected') === 'true') return 'already:' + want;
+      hit.click();
+      return 'clicked:' + want;
+    }""", want)
+    log(f"로그인 탭: {picked}")
+    page.wait_for_timeout(1500)   # 탭을 바꾸면 입력칸이 새로 그려진다(id 도 바뀐다)
+
+    try:
+        page.fill("input[type=text]:visible", user, timeout=15000)
+        page.fill("input[type=password]:visible", pw, timeout=15000)
+    except Exception as e:
+        log(f"로그인 입력칸을 채우지 못함: {str(e)[:60]}")
+        return False
+    page.evaluate("""() => {
+      const U = window.KE_UTIL;
+      const b = U.candidates(document).find(e => U.visible(e) && /^로그인$/.test(U.label(e)));
+      if (b) U.fireClick(b);
+    }""")
+    for _ in range(16):
+        page.wait_for_timeout(1500)
+        try:
+            if "/login" not in page.url:
+                inject()
+                if page.evaluate("""() => {
+                  const U = window.KE_UTIL;
+                  return U.candidates(document).some(e => U.visible(e) && /로그아웃/.test(U.label(e)));
+                }"""):
+                    return True
+        except Exception:
+            pass
+    # 왜 안 됐는지 화면이 말해 준다. 이걸 안 남기면 사람이 손으로 재현할 때까지
+    # 원인을 모른다 - 09-04 에 그렇게 09:00 이 지나갔다. 비밀번호는 찍지 않는다.
+    try:
+        msg = page.evaluate("""() => {
+          const t = document.body.innerText || '';
+          const hits = t.split('\\n').map(s => s.trim()).filter(s =>
+            s && /올바르지|일치하지|확인해|잠[겨금]|정지|오류|실패|다시 시도|보안문자|인증/.test(s));
+          return hits.slice(0, 4);
+        }""")
+        log(f"로그인 화면이 말한 것: {msg or '(별다른 안내 없음)'}")
+    except Exception:
+        pass
+    return False
+
+
 def goal_now(url: str, departure: bool) -> bool:
     return ("/booking/select-award-flight" in url) if departure else (CAL in url)
 
@@ -117,45 +252,33 @@ def main() -> int:
             # 세션이 만료됐으면 네이버 연동으로 다시 들어간다. 네이버 쪽 세션이 살아
             # 있으면 버튼 두 번으로 끝난다 - 비밀번호를 치는 게 아니다.
             # 비밀번호 입력칸이 뜨면 거기서 멈춘다. 그건 사람이 해야 한다.
-            log("로그아웃 상태 - 네이버 연동으로 다시 로그인 시도")
-            did_login = True
-            page.evaluate("""() => {
-              const U = window.KE_UTIL;
-              const b = U.candidates(document).find(e => U.visible(e) && /^로그인$/.test(U.label(e)));
-              if (b) U.fireClick(b);
-            }""")
-            page.wait_for_timeout(6000)
-            inject()
-            page.evaluate("""() => {
-              const U = window.KE_UTIL;
-              const b = U.candidates(document).find(e => U.visible(e) && /네이버|NAVER/i.test(U.label(e)));
-              if (b) U.fireClick(b);
-            }""")
-            for _ in range(16):
-                page.wait_for_timeout(2500)
-                try:
-                    # 대한항공 /login 페이지에도 자체 아이디·비밀번호 칸이 있다.
-                    # 그걸 보고 멈추면 네이버로 넘어가기도 전에 포기한다 (실측:
-                    # 그래서 자동 로그인이 실패했다). 네이버 화면에서 물을 때만 멈춘다.
-                    if "naver" in page.url and page.evaluate("""() => {
-                      const es = document.querySelectorAll('input[type=password]');
-                      for (const e of es) { const r = e.getBoundingClientRect();
-                        if (r.width > 1 && r.height > 1) return true; }
-                      return false;
-                    }"""):
-                        log("네이버가 비밀번호를 요구합니다 - 사람이 로그인해야 함")
-                        break
-                    if "koreanair" in page.url:
-                        inject()
-                        if page.evaluate("""() => {
-                          const U = window.KE_UTIL;
-                          return U.candidates(document).some(e => U.visible(e) && /로그아웃/.test(U.label(e)));
-                        }"""):
-                            logged = True
-                            log("네이버 연동 로그인 성공")
-                            break
-                except Exception:
-                    pass
+            # 어느 방법으로 들어갈지: 실전(9222)은 와이프 스카이패스 아이디/비밀번호,
+            # 계측(9223)은 본인 네이버 연동. .env 에 값이 있어야 아이디/비밀번호를 쓴다.
+            env = load_env()
+            use_idpw = ("9222" in cdp) and env.get("KE_SKYPASS_ID") and env.get("KE_SKYPASS_PW")
+            if use_idpw:
+                log("로그아웃 상태 - 스카이패스 아이디/비밀번호로 로그인 시도 (.env)")
+                did_login = True
+                if login_idpw(page, inject, env["KE_SKYPASS_ID"], env["KE_SKYPASS_PW"],
+                              env.get("KE_LOGIN_TAB", "")):
+                    logged = True
+                    log("스카이패스 로그인 성공")
+                else:
+                    # 네이버로 넘어가지 않는다. 9222 는 와이프 스카이패스 계정이고
+                    # 네이버는 본인 계정이라 **다른 사람으로 로그인**된다.
+                    # 게다가 네이버로 넘어가면 화면이 바뀌어 실패 이유를 잃는다.
+                    log("스카이패스 로그인 실패 - 네이버로 넘어가지 않는다(계정이 다르다)")
+                    print(json.dumps({"ok": False, "url": page.url,
+                                      "why": "로그인 필요: 스카이패스 로그인 실패"},
+                                     ensure_ascii=False))
+                    return 2
+
+            if not logged:
+                log("로그아웃 상태 - 네이버 연동으로 다시 로그인 시도")
+                did_login = True
+                if login_naver(page, inject):
+                    logged = True
+                    log("네이버 연동 로그인 성공")
         if not logged:
             log("로그인 안 됨")
             print(json.dumps({"ok": False, "url": page.url, "why": "로그인 필요"}, ensure_ascii=False))
