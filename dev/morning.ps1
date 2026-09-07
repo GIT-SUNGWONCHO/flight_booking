@@ -38,13 +38,24 @@ function Say([string]$m) {
 
 function Popup([string]$title, [string]$body) {
   # 스케줄러는 창을 숨긴 채 돌리므로, 문제가 생기면 이렇게라도 눈에 띄게 한다.
+  #
+  # **반드시 별도 프로세스로 띄운다.** MessageBox.Show 는 누가 확인을 누를 때까지
+  # 부르는 쪽을 멈춘다. 09-07 에 리허설이 실패하자 이 팝업이 08:26 부터 09:20 까지
+  # morning.ps1 을 붙잡았고, 그 아래 있던 **09:00 실전 코드가 실행조차 되지 않았다.**
+  # 알리려고 만든 것이 지키려던 것을 죽였다. 다시는 이 함수가 흐름을 막지 않는다.
+  $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(@"
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.MessageBox]::Show(@'
+$body
+'@, @'
+$title
+'@, 'OK', 'Warning')
+"@))
   try {
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.MessageBox]::Show($body, $title,
-      [System.Windows.Forms.MessageBoxButtons]::OK,
-      [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+    Start-Process -FilePath (Get-Process -Id $PID).Path `
+      -ArgumentList "-NoProfile", "-WindowStyle", "Hidden", "-EncodedCommand", $enc | Out-Null
   } catch {
-    try { & msg.exe * $body } catch {}
+    try { Start-Process msg.exe -ArgumentList "*", $body | Out-Null } catch {}
   }
 }
 
@@ -52,21 +63,40 @@ Say "=== 아침 시작 ==="
 
 # --- 1) 리허설: 차가운 크롬 -> 로그인 -> 발사까지 ---
 # 여기서 크롬을 죽이고 새로 띄우므로 browsers.ps1 을 따로 부르지 않는다.
-Say ("리허설 (" + ($DailyArgs -join ' ') + ") - 크롬 죽이고 새로, 이미 열린 날짜로 dry 발사")
-$rOut = Join-Path $logDir "rehearse.out"
-$proc = Start-Process -FilePath $py -PassThru -NoNewWindow `
-        -ArgumentList (@((Join-Path $PSScriptRoot "rehearse.py"), "--minutes", "8") + $DailyArgs) `
-        -RedirectStandardOutput $rOut -RedirectStandardError (Join-Path $logDir "rehearse.err")
-# 리허설은 12분이면 끝난다. 20분을 넘기면 실전 셋팅 시간을 먹으므로 잘라낸다.
-if ($proc.WaitForExit(20 * 60 * 1000)) {
-  $rOk = ($proc.ExitCode -eq 0)
-} else {
-  & taskkill /T /F /PID $proc.Id 2>&1 | Out-Null
-  $rOk = $false
-}
-Get-Content $rOut -ErrorAction SilentlyContinue | ForEach-Object { Say "  $_" }
+#
+# 리허설은 '남는 시간에 하는 것' 이다. PC 를 늦게 켜서 스케줄러가 밀린 실행을
+# 뒤늦게 쏘면(StartWhenAvailable) 리허설이 실전 셋팅 시간을 통째로 먹는다.
+# 08:40 이 지났으면 리허설을 통째로 건너뛰고 바로 실전 셋팅으로 간다.
+# 실전 셋팅은 어차피 스스로 로그인·셋업을 하므로 리허설 없이도 굴러간다.
+$deadline = (Get-Date).Date.AddHours(8).AddMinutes(40)
+$leftSec  = [int]($deadline - (Get-Date)).TotalSeconds
+$rOk = $true
+$skipped = $false
 
-if ($rOk) {
+if ($leftSec -lt 300) {
+  $skipped = $true
+  Say ("리허설 건너뜀 - 08:40 이 지났거나 남은 시간이 부족하다 (남은 {0}초). 실전 셋팅으로 바로 간다." -f [Math]::Max($leftSec, 0))
+} else {
+  Say ("리허설 (" + ($DailyArgs -join ' ') + ") - 크롬 죽이고 새로, 이미 열린 날짜로 dry 발사")
+  $rOut = Join-Path $logDir "rehearse.out"
+  $proc = Start-Process -FilePath $py -PassThru -NoNewWindow `
+          -ArgumentList (@((Join-Path $PSScriptRoot "rehearse.py"), "--minutes", "8") + $DailyArgs) `
+          -RedirectStandardOutput $rOut -RedirectStandardError (Join-Path $logDir "rehearse.err")
+  # 08:40 까지만 준다. 넘기면 잘라낸다 - 실전이 리허설보다 중요하다.
+  if ($proc.WaitForExit($leftSec * 1000)) {
+    $rOk = ($proc.ExitCode -eq 0)
+  } else {
+    & taskkill /T /F /PID $proc.Id 2>&1 | Out-Null
+    $rOk = $false
+    Say "리허설이 08:40 을 넘겨 잘라냈다 - 실전 셋팅으로 넘어간다"
+  }
+  Get-Content $rOut -ErrorAction SilentlyContinue | ForEach-Object { Say "  $_" }
+}
+
+if ($skipped) {
+  # 아무것도 안 알린다. 늦게 켠 것은 사람이 이미 아는 사실이고,
+  # 지금 필요한 것은 알림이 아니라 09:00 에 서 있는 것이다.
+} elseif ($rOk) {
   Say "리허설 통과 - 실전 셋팅으로 넘어간다"
 } else {
   $why = ($rOut | Get-Content -ErrorAction SilentlyContinue |

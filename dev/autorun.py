@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ke_setup import run_setup
+from ke_setup import nearest_future, run_setup
 
 ROOT = Path(__file__).resolve().parent.parent
 USER = ROOT / "userscript" / "ke-award-macro.user.js"
@@ -109,9 +109,9 @@ def main() -> int:
     if a.start == "departure":
         setup_cmd += ["--departure"]   # 달력이 아니라 조회 화면까지 가서 선다
     if a.date:
-        mm, dd = a.date.split("-")
-        yr = datetime.now(KST).year + (1 if int(mm) < datetime.now(KST).month else 0)
-        setup_cmd += ["--date", f"{yr}-{mm}-{dd}"]
+        # 연도 계산은 ke_setup.nearest_future 한 곳에만 둔다.
+        # 여기서 따로 계산하다가 09-07 에 2026년 달력을 잡아 세 번 연속 죽었다.
+        setup_cmd += ["--date", nearest_future(a.date).isoformat()]
     # 한 번 실패했다고 하루를 버리지 않는다. 발사 90초 전까지 다시 해본다.
     # (09-04: 새 크롬에서 1차 실패하고 그대로 죽어 09:00 을 통째로 놓쳤다.
     #  이 사실은 FACTS 에 있었는데 재시도를 preflight 에만 넣어 두었다.)

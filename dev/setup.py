@@ -675,10 +675,22 @@ def main() -> int:
 
         goal = DEP if departure else CAL
         ok = goal in page.url
-        log((("조회" if departure else "달력") + (" 도착: " if ok else " 실패: ")) + page.url[:70])
-        print(json.dumps({"ok": ok, "url": page.url,
-                          "why": "" if ok else f"검색이 {'조회' if departure else '달력'} 화면으로 가지 않음"},
-                         ensure_ascii=False))
+        why = "" if ok else f"검색이 {'조회' if departure else '달력'} 화면으로 가지 않음"
+
+        # 주소만 보고 '준비됨' 이라 하면 안 된다. 09-07 에 달력이 **2026년 9월**을
+        # 그리고 있는데도 주소가 calendar-fare-bonus 라서 "달력 도착" 으로 보고했고,
+        # 매크로는 2027년 날짜를 찾다가 단계 0 에서 180초를 흘려보냈다. 세 번 그랬다.
+        # 목표 달(#month{YYYYMM})이 실제로 그려져 있는지 확인한다.
+        if ok and want_date and not departure:
+            ym = want_date[:4] + want_date[5:7]
+            shown = page.evaluate("() => [...document.querySelectorAll('[id^=month]')].map(e => e.id)")
+            if f"month{ym}" not in (shown or []):
+                ok = False
+                why = f"달력이 목표 달을 안 그린다 (원한 month{ym} / 화면 {shown})"
+
+        log((("조회" if departure else "달력") + (" 도착: " if ok else " 실패: ")) +
+            (page.url[:70] if ok else why))
+        print(json.dumps({"ok": ok, "url": page.url, "why": why}, ensure_ascii=False))
         return 0 if ok else 3
 
 

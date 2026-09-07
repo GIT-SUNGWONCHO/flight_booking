@@ -34,13 +34,21 @@ function Say([string]$m) {
 }
 
 function Popup([string]$title, [string]$body) {
+  # 별도 프로세스로 띄운다 - MessageBox.Show 는 확인을 누를 때까지 부르는 쪽을 멈춘다.
+  # 09-07 에 morning.ps1 이 이것 때문에 09:00 을 통째로 건너뛰었다.
+  $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(@"
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.MessageBox]::Show(@'
+$body
+'@, @'
+$title
+'@, 'OK', 'Warning')
+"@))
   try {
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.MessageBox]::Show($body, $title,
-      [System.Windows.Forms.MessageBoxButtons]::OK,
-      [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+    Start-Process -FilePath (Get-Process -Id $PID).Path `
+      -ArgumentList "-NoProfile", "-WindowStyle", "Hidden", "-EncodedCommand", $enc | Out-Null
   } catch {
-    try { & msg.exe * $body } catch {}
+    try { Start-Process msg.exe -ArgumentList "*", $body | Out-Null } catch {}
   }
 }
 

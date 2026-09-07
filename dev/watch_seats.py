@@ -30,7 +30,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ke_setup import run_setup
+from ke_setup import nearest_future, run_setup
 
 ROOT = Path(__file__).resolve().parent.parent
 USER = ROOT / "userscript" / "ke-award-macro.user.js"
@@ -60,22 +60,8 @@ def at(spec: str) -> datetime:
     return t if t > now else t + timedelta(days=1)
 
 
-def nearest_future(mmdd: str) -> date:
-    """MM-DD 를 '앞으로 올 그 날짜' 로 읽는다.
-
-    예전엔 '목표 월 < 이번 달이면 내년' 으로 어림잡았는데, 2026-09-06 처럼 열리는 날이
-    같은 월 번호(2027-09-01)면 올해로 읽어 8개월 과거 날짜에 서게 된다(리뷰 지적).
-    """
-    today = datetime.now(KST).date()
-    mm, dd = (int(x) for x in mmdd.split("-"))
-    for y in (today.year, today.year + 1, today.year + 2):
-        try:
-            d = date(y, mm, dd)
-        except ValueError:
-            continue
-        if d > today:
-            return d
-    raise ValueError(f"날짜를 못 읽음: {mmdd}")
+# nearest_future 는 ke_setup 에 있다. 여기 복사본을 두었다가 autorun 만 옛 규칙으로
+# 남아 09-07 에 세 번 죽었다. 날짜 계산은 저장소에 한 벌만 둔다.
 
 
 # 날짜 띠에서 목표일을 누른다. findStripDate 는 {el, selectable, why} 를 돌려준다.

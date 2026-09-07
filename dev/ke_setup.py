@@ -19,12 +19,35 @@
 """
 from __future__ import annotations
 import json, subprocess, sys, time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 KST = timezone(timedelta(hours=9))
 LOGDIR = Path(__file__).resolve().parent.parent / "dev-shots"
 NL = "\n"
+
+
+def nearest_future(mmdd: str) -> date:
+    """MM-DD 를 '앞으로 올 그 날짜' 로 읽는다.
+
+    **여기 한 곳에만 둔다.** 예전엔 autorun 과 watch_seats 가 각자 계산했고,
+    watch_seats 만 고쳤다가 09-07 에 autorun 이 그대로 터졌다.
+
+    틀렸던 규칙: `올해 + (목표월 < 이번달 ? 1 : 0)`.
+    2026-09-07 에 목표가 09-02(=2027-09-02)면 `9 < 9` 가 거짓이라 2026 을 골라
+    **8개월 과거 날짜**를 잡는다. 달력이 2026년 9월을 그리고, 매크로는 2027년
+    날짜를 찾다가 영원히 단계 0 에 머문다. 09-07 리허설이 세 번 다 이것으로 죽었다.
+    """
+    today = datetime.now(KST).date()
+    mm, dd = (int(x) for x in mmdd.split("-"))
+    for y in (today.year, today.year + 1, today.year + 2):
+        try:
+            d = date(y, mm, dd)
+        except ValueError:
+            continue
+        if d > today:
+            return d
+    raise ValueError(f"날짜를 못 읽음: {mmdd}")
 
 
 def run_setup(cmd, deadline: datetime, log=print, gap: float = 3.0, min_tries: int = 2):

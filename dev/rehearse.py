@@ -20,7 +20,7 @@
   .venv/Scripts/python.exe dev/rehearse.py --route ICN --from FCO --minutes 9
 """
 from __future__ import annotations
-import argparse, json, re, subprocess, sys, time
+import argparse, json, os, re, shutil, subprocess, sys, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -31,6 +31,36 @@ KST = timezone(timedelta(hours=9))
 
 def log(m):
     print(f"[{datetime.now(KST).strftime('%H:%M:%S')}] {m}", flush=True)
+
+
+def find_shell():
+    """파워셸 실행 파일을 찾는다.
+
+    PATH 만 믿으면 안 된다. pwsh 는 스토어 앱이라 PATH 에 있고 없고가 **부르는
+    환경마다 다르다** - 파워셸에서 부르면 보이고 Git Bash 에서 부르면 안 보인다.
+    09-07 에 그것 때문에 리허설이 두 번 죽었다.
+    마지막 후보는 윈도우에 항상 있는 절대경로라 여기까지 오면 반드시 찾는다.
+    """
+    for c in ("pwsh", "powershell"):
+        p = shutil.which(c)
+        if p:
+            return p
+    root = os.environ.get("SystemRoot", r"C:\Windows")
+    for p in (Path(root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe",
+              Path(r"C:\Program Files\PowerShell\7\pwsh.exe")):
+        if p.exists():
+            return str(p)
+    return None
+
+
+def run_quiet(cmd):
+    """외부 도구를 부른다. 출력 인코딩 때문에 죽지 않게 한다.
+
+    윈도우 콘솔 도구(taskkill 등)는 cp949 로 쓰는데 파이썬은 utf-8 로 읽는다.
+    한글 한 글자에 UnicodeDecodeError 가 나서 리허설이 통째로 죽었다. (09-07)
+    """
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
 
 
 def day_args() -> list[str]:
@@ -87,11 +117,16 @@ def main() -> int:
         log("크롬 유지 (차가운 상태 아님 - 실전과 다르다)")
     else:
         log("크롬 죽이고 새로 띄운다 (부팅 직후와 같은 조건)")
-        subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
-                       capture_output=True, text=True)
+        # text=True 만 주면 파이썬이 utf-8 로 읽는데 윈도우 콘솔 도구는 cp949 로 쓴다.
+        # taskkill 의 한글 출력에서 UnicodeDecodeError 가 났다. (09-07)
+        run_quiet(["taskkill", "/F", "/IM", "chrome.exe"])
         time.sleep(3)
-    subprocess.run(["pwsh", "-NoProfile", "-File", str(ROOT / "dev" / "browsers.ps1")],
-                   capture_output=True, text=True)
+
+    shell = find_shell()
+    if not shell:
+        log("!! 파워셸을 찾지 못했다 - 크롬을 띄울 수 없다")
+        return 1
+    run_quiet([shell, "-NoProfile", "-File", str(ROOT / "dev" / "browsers.ps1")])
 
     # --- 2) 9시에 도는 것과 같은 진입점 ---
     for f in ("watch_seats.json", "autorun_report.json"):
