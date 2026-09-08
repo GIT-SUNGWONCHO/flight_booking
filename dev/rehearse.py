@@ -53,6 +53,53 @@ def find_shell():
     return None
 
 
+def kill_our_chrome(shell) -> int:
+    """**이 저장소의 프로필 크롬만** 종료한다. 몇 개 죽였는지 돌려준다.
+
+    예전엔 `taskkill /F /IM chrome.exe` 였다. 그건 이 PC 의 **모든 크롬**을 죽인다 -
+    사용자 개인 창, 그리고 지금은 다른 작업자가 쓰는 9232/9233 프로필까지.
+    남의 작업을 죽이는 것은 리허설의 권한 밖이다. (09-08, 사용자 지시)
+
+    명령줄에 우리 user-data-dir 이 들어간 프로세스만 고른다. 포트로 고르면
+    자식 프로세스(렌더러)가 안 걸려 반쯤 살아남는다.
+
+    한 번으로는 안 죽는다. 부모를 죽여도 렌더러가 남고, 남은 프로세스가 프로필을
+    잠가 **새 크롬이 아예 안 뜬다**. 09-07 리허설에서 9223 이 끝내 안 올라와
+    계측기가 69번 재시도하다 죽은 것이 이것이다. 0 이 될 때까지 반복한다. (09-08 실측)
+    """
+    dirs = [str(ROOT / ".debug-profile"), str(ROOT / ".debug-profile2")]
+    # -like 는 와일드카드가 필요하고 경로의 \ 는 그대로 두면 된다.
+    conds = " -or ".join([f"$_.CommandLine -like '*{d}*'" for d in dirs])
+    ps = (
+        "$n=0; Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        f"Where-Object {{ {conds} }} | ForEach-Object {{ "
+        "try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $n++ } catch {} }; $n"
+    )
+    count_ps = (
+        "(Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        f"Where-Object {{ {conds} }}).Count"
+    )
+
+    def n_left():
+        r = run_quiet([shell, "-NoProfile", "-Command", count_ps])
+        try:
+            return int((r.stdout or "0").strip().splitlines()[-1])
+        except Exception:
+            return 0
+
+    killed = 0
+    for _ in range(6):
+        r = run_quiet([shell, "-NoProfile", "-Command", ps])
+        try:
+            killed += int((r.stdout or "0").strip().splitlines()[-1])
+        except Exception:
+            pass
+        time.sleep(1.0)
+        if n_left() == 0:
+            break
+    return killed
+
+
 def run_quiet(cmd):
     """외부 도구를 부른다. 출력 인코딩 때문에 죽지 않게 한다.
 
@@ -112,20 +159,20 @@ def main() -> int:
         if a.route else day_args()
     log(f"리허설 노선: {' '.join(args) or '(자동)'}")
 
-    # --- 1) 차가운 크롬. 이게 이 스크립트의 존재 이유다 ---
-    if a.keep_browsers:
-        log("크롬 유지 (차가운 상태 아님 - 실전과 다르다)")
-    else:
-        log("크롬 죽이고 새로 띄운다 (부팅 직후와 같은 조건)")
-        # text=True 만 주면 파이썬이 utf-8 로 읽는데 윈도우 콘솔 도구는 cp949 로 쓴다.
-        # taskkill 의 한글 출력에서 UnicodeDecodeError 가 났다. (09-07)
-        run_quiet(["taskkill", "/F", "/IM", "chrome.exe"])
-        time.sleep(3)
-
     shell = find_shell()
     if not shell:
         log("!! 파워셸을 찾지 못했다 - 크롬을 띄울 수 없다")
         return 1
+
+    # --- 1) 차가운 크롬. 이게 이 스크립트의 존재 이유다 ---
+    if a.keep_browsers:
+        log("크롬 유지 (차가운 상태 아님 - 실전과 다르다)")
+    else:
+        log("우리 프로필 크롬만 죽이고 새로 띄운다 (부팅 직후와 같은 조건)")
+        killed = kill_our_chrome(shell)
+        log(f"  종료한 크롬 프로세스 {killed}개 (우리 프로필만)")
+        time.sleep(3)
+
     run_quiet([shell, "-NoProfile", "-File", str(ROOT / "dev" / "browsers.ps1")])
 
     # --- 2) 9시에 도는 것과 같은 진입점 ---

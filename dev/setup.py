@@ -112,17 +112,43 @@ def login_idpw(page, inject, user: str, pw: str, tab: str = "") -> bool:
         inject()
 
     want = tab or ("스카이패스" if user.isdigit() else "아이디")
-    picked = page.evaluate("""(want) => {
-      const tabs = [...document.querySelectorAll('button[role=tab]')]
-        .filter(e => { const r = e.getBoundingClientRect(); return r.width > 1; });
-      const hit = tabs.find(e => (e.innerText || '').replace(/\\s+/g, ' ').includes(want));
-      if (!hit) return 'tab못찾음:' + tabs.map(e => (e.innerText||'').trim()).join('/');
-      if (hit.getAttribute('aria-selected') === 'true') return 'already:' + want;
-      hit.click();
-      return 'clicked:' + want;
-    }""", want)
-    log(f"로그인 탭: {picked}")
+
+    # 탭이 그려질 때까지 기다린다. 로그인 페이지로 **리다이렉트된 직후**에는 탭이
+    # 아직 없어서 'tab못찾음:' (콜론 뒤가 빈 문자열)이 뜨고, 그대로 기본 '아이디'
+    # 탭에 스카이패스 번호를 넣어 "일치하는 회원정보가 없습니다" 로 끝난다.
+    # 09-08 아침 자동 실행이 이것으로 죽었다 - 어제는 페이지가 이미 떠 있어 통했다.
+    picked = None
+    for _ in range(20):
+        picked = page.evaluate("""(want) => {
+          const tabs = [...document.querySelectorAll('button[role=tab]')]
+            .filter(e => { const r = e.getBoundingClientRect(); return r.width > 1; });
+          if (!tabs.length) return null;                       // 아직 안 그려짐
+          const hit = tabs.find(e => (e.innerText || '').replace(/\\s+/g, ' ').includes(want));
+          if (!hit) return 'tab못찾음:' + tabs.map(e => (e.innerText||'').trim()).join('/');
+          if (hit.getAttribute('aria-selected') === 'true') return 'already:' + want;
+          hit.click();
+          return 'clicked:' + want;
+        }""", want)
+        if picked:
+            break
+        page.wait_for_timeout(700)
+    log(f"로그인 탭: {picked or '탭이 끝내 안 나타남'}")
+    if not picked or picked.startswith("tab못찾음"):
+        # 여기서 멈춘다. 엉뚱한 탭에 번호를 넣으면 사이트가 '회원정보 없음' 으로
+        # 답하고, 그 문구만 보면 비밀번호가 틀린 줄 안다. 09-08 에 그렇게 헤맸다.
+        return False
     page.wait_for_timeout(1500)   # 탭을 바꾸면 입력칸이 새로 그려진다(id 도 바뀐다)
+
+    # 고른 탭이 실제로 선택됐는지 확인한다. 클릭이 먹지 않았는데 진행하면 같은 일이 난다.
+    sel = page.evaluate("""() => {
+      const t = [...document.querySelectorAll('button[role=tab]')]
+        .find(e => e.getAttribute('aria-selected') === 'true');
+      return t ? (t.innerText || '').replace(/\\s+/g, ' ').trim() : '';
+    }""")
+    log(f"  선택된 탭: {sel or '(없음)'}")
+    if want not in sel:
+        log(f"  탭이 '{want}' 로 안 바뀌었다 - 중단")
+        return False
 
     try:
         page.fill("input[type=text]:visible", user, timeout=15000)

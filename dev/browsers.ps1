@@ -13,9 +13,20 @@ $targets = @(
   @{ Port = 9223; Profile = ".debug-profile2"; Name = "계측용" }
 )
 
+# 포트가 LISTEN 으로 보여도 크롬이 살아 있다는 뜻이 아니다. 방금 죽인 크롬의
+# 소켓이 잠시 남아 "이미 떠 있음" 으로 읽히고, 그러면 새로 띄우지 않아 아무것도
+# 없는 상태가 된다. 09-07 리허설에서 9223 이 끝내 안 올라와 계측기가 69번
+# 재시도하다 죽은 것이 이것이다. **CDP 가 실제로 답하는지**로 판정한다. (09-08)
+function Alive([int]$port) {
+  try {
+    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/json/version" `
+         -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+    return $r.StatusCode -eq 200
+  } catch { return $false }
+}
+
 foreach ($t in $targets) {
-  $up = Get-NetTCPConnection -State Listen -LocalPort $t.Port -ErrorAction SilentlyContinue
-  if ($up) {
+  if (Alive $t.Port) {
     Write-Output "$($t.Name) 크롬 이미 떠 있음 (포트 $($t.Port))"
     continue
   }
@@ -32,8 +43,12 @@ foreach ($t in $targets) {
   Write-Output "$($t.Name) 크롬 띄움 (포트 $($t.Port))"
 }
 
-Start-Sleep -Seconds 8
+# 8초 고정 대기로는 부족할 때가 있다. 실제로 답할 때까지 최대 30초 기다린다.
 foreach ($t in $targets) {
-  $up = Get-NetTCPConnection -State Listen -LocalPort $t.Port -ErrorAction SilentlyContinue
-  Write-Output ("포트 $($t.Port): " + $(if ($up) { "OK" } else { "안 올라옴" }))
+  $ok = $false
+  for ($i = 0; $i -lt 30; $i++) {
+    if (Alive $t.Port) { $ok = $true; break }
+    Start-Sleep -Seconds 1
+  }
+  Write-Output ("포트 $($t.Port): " + $(if ($ok) { "OK" } else { "안 올라옴 (30초 기다림)" }))
 }
