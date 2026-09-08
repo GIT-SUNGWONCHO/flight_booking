@@ -26,19 +26,48 @@ TARGETS = {
 }
 
 
+def where(run_day: date) -> str:
+    """그날 누가 돌리나.
+
+    이 윈도우 PC 는 평일에만 켜 둔다. 토·일은 사용자가 맥으로 들어가야 하고,
+    못 들어가면 그날은 못 잰다. (09-08 사용자 확인)
+    """
+    return "이 PC (자동)" if run_day.weekday() < 5 else "**맥 (사람이 켜야 함)**"
+
+
+def next_target(run_day: date):
+    """그날 기준으로 **다음에 올 실전**. 연습은 그 노선을 밟는다."""
+    for d in sorted(TARGETS):
+        if d >= run_day:
+            return d, TARGETS[d]
+    return None, None
+
+
 def plan(run_day: date):
-    """그날 09:00 에 무엇을 할지. (열리는날, 로마여부, 노선표기, 비고)"""
+    """그날 09:00 에 무엇을 할지. (열리는날, 로마여부, 노선표기, 비고)
+
+    연습은 **다음 실전과 같은 노선**으로 한다. 로마가 뜨는 날이라고 로마를 잡으면,
+    09-14 인천→파리 실전을 앞두고 엉뚱한 노선을 연습하게 된다. (09-08 사용자 지적)
+    """
     opens = run_day + timedelta(days=OFFSET)
     rome = opens.weekday() in ROME_DAYS
+
     if run_day in TARGETS:
         o, r, label = TARGETS[run_day]
         ok = rome if "FCO" in (o, r) else True
         note = "**실전**" if ok else "**실전인데 그날 로마가 안 뜬다 - 확인 필요**"
         return opens, rome, label, note
-    # 연습: 실전과 같은 방향을 밟는다. 로마가 뜨는 날은 로마로.
-    if rome:
-        return opens, rome, "로마 → 인천", "연습 (실전과 같은 노선)"
-    return opens, rome, "파리 → 인천", "연습 (유럽발 경로)"
+
+    tgt_day, tgt = next_target(run_day)
+    if not tgt:
+        return opens, rome, "파리 → 인천", "연습 (목표 없음 - 유럽발 유지)"
+
+    o, r, label = tgt
+    # 로마 노선인데 그날 로마가 안 뜨면 그 노선을 못 밟는다.
+    # 방향(유럽발)이라도 같게 파리로 대신한다.
+    if "FCO" in (o, r) and not rome:
+        return opens, rome, "파리 → 인천", f"연습 (대체 - {tgt_day.strftime('%m/%d')} 로마 실전 대비, 그날 로마 없음)"
+    return opens, rome, label, f"연습 ({tgt_day.strftime('%m/%d')} 실전과 같은 노선)"
 
 
 def main() -> int:
@@ -67,14 +96,17 @@ def main() -> int:
     out.append("'로마' 칸은 **그날 열리는 출발일에 로마 노선이 뜨는가**다. 파리는 매일 뜨므로")
     out.append("파리 연습일에는 이 칸이 X 여도 상관없다.")
     out.append("")
-    out.append("| 실행일 | 09:00 에 열리는 출발일 | 로마 | 그날 할 것 | 비고 |")
-    out.append("|---|---|---|---|---|")
+    out.append("**마지막 실전(09-25)까지는 매일 돌린다.** 토·일은 이 PC 가 꺼져 있어")
+    out.append("사용자가 맥으로 들어가야 하고, 못 들어가면 그날은 못 잰다.")
+    out.append("")
+    out.append("| 실행일 | 09:00 에 열리는 출발일 | 로마 | 그날 할 것 | 어디서 | 비고 |")
+    out.append("|---|---|---|---|---|---|")
     for d, opens, rome, label, note in rows:
         dd = f"{d}({WD[d.weekday()]})"
         oo = f"{opens}({WD[opens.weekday()]})"
         if d in TARGETS:
             dd = f"**{dd}**"
-        out.append(f"| {dd} | {oo} | {'O' if rome else 'X'} | {label} | {note} |")
+        out.append(f"| {dd} | {oo} | {'O' if rome else 'X'} | {label} | {where(d)} | {note} |")
 
     out.append("")
     out.append("## 실전 목표 세 개")
