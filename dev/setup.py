@@ -27,6 +27,35 @@ CAL = "/booking/calendar-fare-bonus"
 def log(m): print(f"  {m}", flush=True)
 
 
+def stamp_title(page, port: int):
+    """창 제목에 `[Claude · 9223 계측]` 말머리를 찍는다.
+
+    이 PC 에는 크롬이 여럿 떠 있다 - 사용자 개인 창, 다른 작업자의 워크트리(9232/9233),
+    우리 둘(9222/9223). 창만 봐서는 어느 것이 무엇인지 모른다. (09-08 사용자 요청)
+
+    **셋업이 끝나는 자리에서 찍는다.** 크롬 창 제목은 탭 제목이라 밖에서 못 고치고,
+    Playwright 의 add_init_script 는 연결이 끊기면 같이 사라진다(09-08 실측: 이동 후
+    말머리가 없어졌다). 셋업이 끝나면 브라우저는 그 화면에 서서 기다리고, 사람이
+    보는 것도 그때다. setInterval 로 1초마다 다시 붙여 KE 가 제목을 덮어써도 남는다.
+    """
+    name = {9222: "실전", 9223: "계측"}.get(port, "")
+    tag = f"[Claude · {port} {name}]".replace(" ]", "]")
+    try:
+        page.evaluate("""(tag) => {
+          if (window.__keTitleTimer) clearInterval(window.__keTitleTimer);
+          const fix = () => {
+            try {
+              const t = document.title || '';
+              if (t.indexOf(tag) !== 0) document.title = tag + ' ' + t;
+            } catch (e) {}
+          };
+          fix();
+          window.__keTitleTimer = setInterval(fix, 1000);
+        }""", tag)
+    except Exception:
+        pass
+
+
 def load_env() -> dict:
     """저장소 루트의 .env 를 읽는다. 없으면 빈 dict.
 
@@ -728,6 +757,11 @@ def main() -> int:
                 ok = False
                 why = f"달력이 목표 달을 안 그린다 (원한 month{ym} / 화면 {shown})"
 
+        # 어느 크롬인지 창 제목에 남긴다. 여기서 브라우저가 서서 기다린다.
+        try:
+            stamp_title(page, int(cdp.rsplit(":", 1)[1]))
+        except Exception:
+            pass
         log((("조회" if departure else "달력") + (" 도착: " if ok else " 실패: ")) +
             (page.url[:70] if ok else why))
         print(json.dumps({"ok": ok, "url": page.url, "why": why}, ensure_ascii=False))

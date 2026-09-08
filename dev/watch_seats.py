@@ -25,7 +25,7 @@
   .venv/Scripts/python.exe dev/watch_seats.py --route FCO --date 08-30 --at 09:00 --port 9223
 """
 from __future__ import annotations
-import argparse, json, subprocess, sys, time, traceback
+import argparse, json, os, shutil, subprocess, sys, time, traceback
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -49,6 +49,17 @@ def wait_until(when: datetime) -> None:
         if left <= 0.02:
             return
         time.sleep(min(5, max(0.02, left)))
+
+
+def browser_alive(port: int) -> bool:
+    """CDP 가 실제로 답하는지 본다. 포트가 LISTEN 이라고 살아 있는 게 아니다 -
+    방금 죽은 크롬의 소켓이 잠시 남아 거짓으로 읽힌다(09-08 실측)."""
+    import urllib.request
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=3).read()
+        return True
+    except Exception:
+        return False
 
 
 def at(spec: str) -> datetime:
@@ -84,18 +95,29 @@ SCREEN = """() => {
 
 # 목표 날짜의 좌석. lastAt 은 '그 날짜를 담은 응답' 의 도착 시각이라야 한다.
 # 아무 응답의 시각을 쓰면 D-1 되쏘기가 새 표본으로 둔갑한다(리뷰 지적).
+"""브라우저에 **이미 쌓인** 응답을 읽는다. 서버에 새로 묻는 것은 reAsk 뿐이다.
+
+이 구분이 중요하다. 이 함수를 0.2초마다 부른다고 0.2초마다 재는 것이 아니다 -
+같은 응답을 다시 읽을 뿐이다. 표본이 새로워지는 것은 **새 응답이 도착했을 때**고,
+그건 reAsk 가 보낸 요청이 돌아왔을 때다. (09-08 사용자 지적)
+
+그래서 srcId 를 같이 돌려준다. 이 값이 바뀌어야 새 응답이다.
+"""
 READ = """(cab) => {
   const P = window.KE_PROBE;
   if (!P || !P.keCabin) return null;
-  var lastAt = 0;
-  try {
-    var hs = P.hits(), want = String(cab).replace(/[^0-9]/g, '');
-    for (var i = hs.length - 1; i >= 0; i--) {
-      if (!/availab/i.test(hs[i].url)) continue;
-      if (hs[i].body && hs[i].body.indexOf(want) !== -1) { lastAt = hs[i].at; break; }
-    }
-  } catch (e) {}
-  return { pr: P.keCabin('프레스티지', cab), ey: P.keCabin('일반석', cab), lastAt: lastAt };
+  const pr = P.keCabin('프레스티지', cab);
+  const ey = P.keCabin('일반석', cab);
+  const src = pr || ey || null;
+  return {
+    pr: pr, ey: ey,
+    srcId:     src ? (src.srcId || 0) : 0,
+    srcAt:     src ? (src.srcAt || 0) : 0,
+    srcSentAt: src ? (src.srcSentAt || 0) : 0,
+    srcStatus: src ? (src.srcStatus || 0) : 0,
+    lastAt:    src ? (src.srcAt || 0) : 0,
+    now: Date.now()
+  };
 }"""
 
 
@@ -122,7 +144,11 @@ def main() -> int:
     end_at = open_at + timedelta(seconds=a.until)
 
     rows: list = []
-    report = {"startedAt": datetime.now(KST).isoformat(), "route": a.route,
+    asks: list = []          # reAsk 를 언제 보냈나. 표본과 대조해 왕복 시간을 본다
+    # 실행마다 다른 이름으로도 남긴다. 고정 이름 하나면 오후 리허설이 09:00 을 덮는다.
+    run_id = datetime.now(KST).strftime("%Y%m%d_%H%M%S")
+    report = {"runId": run_id,
+              "startedAt": datetime.now(KST).isoformat(), "route": a.route,
               "origin": a.origin or "SEL", "date": a.date, "target": tgt.isoformat(),
               "openAt": open_at.isoformat(), "ok": False, "why": "시작 전"}
 
@@ -132,9 +158,44 @@ def main() -> int:
             ever = any(r.get("prListed") for r in rows)
             report["rows"] = rows
             report["samples"] = len(rows)
+            report["asks"] = asks           # 서버에 실제로 새로 물은 횟수·시각
+            report["asksSent"] = sum(1 for x in asks if x.get("ok"))
             report["prestigeEverListed"] = ever
+
+            # --- 소진 시각을 함부로 말하지 않는다 -------------------------------
+            # 첫 표본부터 0 이면 '6초 안에 팔렸다' 고 말할 수 없다. 애초에 공급이
+            # 없었는지, 우리가 늦어서 못 봤는지 구별이 안 된다. (09-08 사용자 지적)
+            # 양수 -> 0 을 실제로 본 경우에만 그 사이를 소진 구간이라 부른다.
+            pos = [r for r in rows if r.get("prListed") and not r.get("prSoldout")
+                   and (r.get("prSeats") or 0) > 0]
+            if not rows:
+                verdict, window = "표본 없음", None
+            elif not pos:
+                first = rows[0]
+                verdict = ("소진 시각 미확인 - 첫 표본(오픈+"
+                           f"{first.get('sinceOpen')}s)부터 0석. "
+                           "그 전에 팔렸는지, 애초에 안 열렸는지 구별 못 함")
+                window = None
+            elif report.get("goneSinceOpen") is not None:
+                last_pos = pos[-1]
+                verdict = "소진 관측됨"
+                window = {"lastPositiveSinceOpen": last_pos.get("sinceOpen"),
+                          "lastPositiveSeats": last_pos.get("prSeats"),
+                          "firstZeroSinceOpen": report.get("goneSinceOpen")}
+            else:
+                verdict = f"관측 끝까지 남아 있었다 (최대 {report.get('maxPrestigeSeats')}석)"
+                window = None
+            report["depletion"] = verdict
+            report["depletionWindow"] = window
+
             OUT.mkdir(exist_ok=True)
             (OUT / "watch_seats.json").write_text(
+                json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+            # 실행별로도 남긴다. 고정 이름 하나면 오후 리허설이 09:00 결과를 덮어쓴다.
+            # (09-08 사용자 지적) 09:00 결과는 되돌릴 수 없는 자료다.
+            runs = OUT / "runs"
+            runs.mkdir(exist_ok=True)
+            (runs / f"watch_{run_id}.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
             with (OUT / "seat_history.jsonl").open("a", encoding="utf-8") as f:
                 f.write(json.dumps({
@@ -153,6 +214,23 @@ def main() -> int:
     # --- 준비: 목표 근처(가급적 D-1)의 조회 화면에 선다 ---
     if a.setup_at:
         wait_until(at(a.setup_at))
+    # 브라우저가 없으면 띄운다. autorun 에는 이 장치가 있는데 계측기에는 없어서,
+    # 크롬이 안 뜬 채로 셋업을 수십 번 되풀이하다 마감을 맞았다 (09-07: 69회, 09-08: 10회).
+    # 없는 브라우저에 다시 붙어봐야 소용없다 - 띄우는 게 먼저다.
+    if not browser_alive(a.port):
+        log(f"포트 {a.port} 크롬이 없다 - 띄운다")
+        shell = shutil.which("pwsh") or shutil.which("powershell") or (
+            str(Path(os.environ.get("SystemRoot", r"C:\Windows"))
+                / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"))
+        try:
+            subprocess.run([shell, "-NoProfile", "-File",
+                            str(ROOT / "dev" / "browsers.ps1")],
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=180)
+        except Exception as e:
+            log(f"  띄우기 실패: {str(e)[:60]}")
+        log(f"  포트 {a.port}: {'OK' if browser_alive(a.port) else '여전히 없음'}")
+
     # 달력에 선다.
     #
     # 조회 화면에 서서 날짜 띠를 누르는 방식은 못 쓴다: 조회 페이지를 새로고침하면
@@ -253,14 +331,35 @@ def main() -> int:
             log(report["why"]); save_report(); b.close(); return 5
 
         # --- 2) D 응답이 올 때까지 기다린다 (되쏘기는 그 뒤에) ---
-        seen_at = 0
+        #
+        # 여기서 도는 0.2초 반복은 **브라우저에 쌓인 응답을 읽는 것**이지 서버에
+        # 새로 묻는 것이 아니다. 서버에 묻는 것은 화면 자신의 조회와 reAsk 뿐이다.
+        # 그래서 '보낸 시각 / 도착 시각 / 우리가 읽은 시각' 을 나눠 남긴다 -
+        # 첫 표본이 늦은 구간이 우리 쪽인지 서버 쪽인지 가르려면 이 셋이 필요하다.
+        seen_id = 0
         got_d = False
         while datetime.now(KST) < end_at and not got_d:
             try:
                 d = page.evaluate(READ, a.date)
             except Exception:
                 d = None
-            if d and (d.get("lastAt") or 0) > 0 and (d.get("pr") or d.get("ey")):
+            if d and (d.get("srcId") or 0) > 0 and (d.get("pr") or d.get("ey")):
+                read_at = datetime.now(KST)
+                sent_ms, arr_ms = d.get("srcSentAt") or 0, d.get("srcAt") or 0
+                # 브라우저 시계(ms) 를 오픈 기준 초로 옮긴다. now 로 맞춘다.
+                base = d.get("now") or arr_ms
+                off = (read_at - open_at).total_seconds() - (base / 1000.0)
+                report["first"] = {
+                    "srcId": d.get("srcId"),
+                    "status": d.get("srcStatus"),
+                    "sentSinceOpen": round(sent_ms / 1000.0 + off, 2) if sent_ms else None,
+                    "arrivedSinceOpen": round(arr_ms / 1000.0 + off, 2) if arr_ms else None,
+                    "readSinceOpen": round((read_at - open_at).total_seconds(), 2),
+                }
+                f = report["first"]
+                log(f"첫 목표일 응답:  보냄 오픈+{f['sentSinceOpen']}s"
+                    f" -> 도착 오픈+{f['arrivedSinceOpen']}s"
+                    f" -> 읽음 오픈+{f['readSinceOpen']}s  (응답 #{f['srcId']})")
                 got_d = True
                 break
             time.sleep(0.2)
@@ -280,15 +379,29 @@ def main() -> int:
                 d = page.evaluate(READ, a.date)
             except Exception:
                 d = None
-            if d and (d.get("lastAt") or 0) > seen_at and (d.get("pr") or d.get("ey")):
-                seen_at = d["lastAt"]
+            # **새 응답일 때만** 표본으로 센다. 같은 응답을 다시 읽은 것은 표본이 아니다.
+            # 예전엔 도착 시각(lastAt)으로 걸렀는데, 그것만으로는 '새 응답을 읽었다' 를
+            # 보증하지 못한다. 응답마다 붙는 id 로 가른다. (09-08 사용자 지적)
+            if d and (d.get("srcId") or 0) > seen_id and (d.get("pr") or d.get("ey")):
+                seen_id = d["srcId"]
                 pr, ey = d.get("pr") or {}, d.get("ey") or {}
                 now = datetime.now(KST)
                 secs = round((now - open_at).total_seconds(), 2)
+                sent_ms, arr_ms = d.get("srcSentAt") or 0, d.get("srcAt") or 0
+                base = d.get("now") or arr_ms
+                off = secs - (base / 1000.0)
                 rows.append({"at": now.isoformat(), "sinceOpen": secs,
                              "prSeats": pr.get("seats"), "prSoldout": pr.get("soldout"),
                              "prListed": pr.get("listed"), "eySeats": ey.get("seats"),
-                             "keFlights": pr.get("keFlights")})
+                             "keFlights": pr.get("keFlights"),
+                             # 이 표본이 어느 응답에서 나왔는지. 눈으로 검증할 수 있게.
+                             "srcId": d.get("srcId"), "srcStatus": d.get("srcStatus"),
+                             "sentSinceOpen": round(sent_ms / 1000.0 + off, 2) if sent_ms else None,
+                             "arrivedSinceOpen": round(arr_ms / 1000.0 + off, 2) if arr_ms else None,
+                             "target": tgt.isoformat(),
+                             "route": f"{a.origin or 'SEL'}->{a.route}",
+                             # 편명·등급·좌석수 원본 (인증정보 없음)
+                             "flights": pr.get("flights")})
                 mark = ""
                 if pr.get("listed") and not pr.get("soldout"):
                     # 0 도 유효한 값이다. truthiness 로 보면 0 이 falsy 라 1->0 을 놓친다.
@@ -307,10 +420,17 @@ def main() -> int:
             gap = a.fast_gap if since_open < a.fast_window else a.gap
             if (time.time() - last_ask) >= gap:
                 last_ask = time.time()
+                # 서버에 실제로 새로 묻는 곳은 여기뿐이다. 위의 읽기 반복은 이미 온
+                # 응답을 볼 뿐이다. 언제 보냈는지 남겨 표본과 대조할 수 있게 한다.
                 try:
-                    page.evaluate("() => window.KE_PROBE && KE_PROBE.reAsk()")
+                    r = page.evaluate("() => window.KE_PROBE && KE_PROBE.reAsk()")
+                    asks.append({"sinceOpen": round(
+                        (datetime.now(KST) - open_at).total_seconds(), 2),
+                        "ok": bool(r and r.get("ok")), "why": (r or {}).get("why")})
                 except Exception:
-                    pass
+                    asks.append({"sinceOpen": round(
+                        (datetime.now(KST) - open_at).total_seconds(), 2),
+                        "ok": False, "why": "evaluate 실패"})
             time.sleep(0.15)
 
         report.update(ok=True, why="", maxPrestigeSeats=best,

@@ -21,6 +21,7 @@
   var CAP = 200000;        // 한 건당 글자 수 상한 (localStorage 가 아니라 메모리다)
   var hits = [];
   var stamp = 0;         // 기록이 늘 때마다 증가. 화면 갱신 여부를 값싸게 판단한다
+  var seq = 0;           // 기록마다 붙는 고유 번호. 표본을 특정 응답에 묶는 데 쓴다
 
   /* 좌석/운임 조회로 보이는 응답만 남긴다. 전부 남기면 로그인 토큰 같은 것까지
    * 딸려 들어와 내보내기가 위험해진다. */
@@ -35,12 +36,21 @@
    * 계측기가 이걸 그대로 되쏘면 페이지 새로고침(~2초+렌더) 없이 재조회가 되어
    * 표본 간격이 6초에서 1초대로 줄어든다. 되쏘는 주체는 페이지 자신이라
    * 세션·쿠키·오리진이 원래 요청과 같다. */
-  function note(kind, url, status, body, req) {
+  /* id / sentAt 을 같이 남긴다.
+   *
+   * 왜: 계측기가 "새 응답을 읽었나" 를 알 수 있어야 한다. 예전엔 응답 도착 시각(at)
+   * 하나뿐이라, 같은 응답을 다시 읽은 것과 새 응답을 읽은 것을 구별할 수 없었다.
+   * 그리고 '요청을 보낸 시각' 이 아예 없어서 첫 표본이 늦은 이유가 우리 쪽인지
+   * 서버 쪽인지 가를 수 없었다. (09-08 사용자 지적)
+   *   sentAt  요청을 보낸 시각      at  응답이 도착해 기록된 시각
+   *   id      기록마다 1씩 증가     이 값이 바뀌어야 새 응답이다 */
+  function note(kind, url, status, body, req, sentAt) {
     try {
       if (!WANTED.test(String(url)) || NOISE.test(String(url))) return;
       var text = String(body == null ? '' : body);
       if (text.length > CAP) text = text.slice(0, CAP) + '…(잘림)';
-      hits.push({ at: Date.now(), kind: kind, url: String(url).slice(0, 300),
+      hits.push({ id: ++seq, at: Date.now(), sentAt: sentAt || 0,
+                  kind: kind, url: String(url).slice(0, 300),
                   status: status, seaty: SEATY.test(text), body: text,
                   req: req || null });
       if (hits.length > MAX) hits.shift();
@@ -66,10 +76,11 @@
                  body: (init && typeof init.body === 'string') ? init.body : null,
                  headers: h };
         } catch (e) {}
+        var sentAt = Date.now();     // 보낸 시각. 응답 도착(at)과 나눠 봐야 어디가 느린지 안다
         return of.apply(this, arguments).then(function (res) {
           try {
             if (WANTED.test(String(url))) {
-              res.clone().text().then(function (t) { note('fetch', url, res.status, t, rq); },
+              res.clone().text().then(function (t) { note('fetch', url, res.status, t, rq, sentAt); },
                                       function () {});
             }
           } catch (e) {}
@@ -99,13 +110,14 @@
       XP.send = function (body) {
         var self = this;
         try { self.__keBody = (typeof body === 'string') ? body : null; } catch (e) {}
+        var sentAt = Date.now();
         try {
           self.addEventListener('load', function () {
             var t = '';
             try { t = (self.responseType === '' || self.responseType === 'text') ? self.responseText : ''; } catch (e) {}
             note('xhr', self.__keUrl, self.status, t,
                  { method: self.__keMethod || 'GET', body: self.__keBody || null,
-                   headers: self.__keHeaders || {} });
+                   headers: self.__keHeaders || {} }, sentAt);
           });
         } catch (e) {}
         return os.apply(this, arguments);
@@ -284,6 +296,9 @@
       var d; try { d = JSON.parse(hits[i].body); } catch (e) { continue; }
       var bounds = (d && d.upsellBoundAvailList) || [];
       var listed = false, openSeats = 0, soldCount = 0, keCount = 0, ey = 0, dateSeen = false;
+      /* 표본을 눈으로 검증할 수 있게 편별 원본을 남긴다. 인증정보는 담지 않는다 -
+       * 편명·날짜·등급·좌석수·매진여부만. (09-08 사용자 요청) */
+      var rows = [];
       bounds.forEach(function (b) {
         ((b && b.availFlightList) || []).forEach(function (f) {
           var info = (f.flightInfoList && f.flightInfoList[0]) || {};
@@ -293,7 +308,18 @@
           dateSeen = true;
           if (!isKE) return;                        // 코드셰어(외항사 운항) 제외
           keCount++;
+          var row = {
+            flight: String(info.marketingCarrierCode || info.operationCarrierCode || '')
+                    + String(info.flightNumber || info.marketingFlightNumber || ''),
+            oper: info.operationCarrierCode || '',
+            codeShare: !!info.codeShare,
+            date: String(f.departureDate || ''),
+            from: info.departureAirportCode || info.boardPoint || '',
+            to: info.arrivalAirportCode || info.offPoint || '',
+            fams: []
+          };
           ((f.commercialFareFamilyList) || []).forEach(function (c) {
+            row.fams.push({ fam: c.fareFamily, seatCount: c.seatCount, soldout: !!c.soldout });
             if (c.fareFamily === fam) {
               listed = true;
               if (c.soldout) soldCount++;
@@ -303,6 +329,7 @@
               ey = Math.max(ey, parseInt(c.seatCount, 10) || 0);
             }
           });
+          rows.push(row);
         });
       });
       if (!dateSeen && want) continue;              // 이 응답엔 그 날짜가 없다 - 더 옛 응답을 본다
@@ -312,7 +339,11 @@
         listed: listed,
         soldout: listed && openSeats === 0 && soldCount > 0,
         seats: openSeats,
-        eySeats: ey
+        eySeats: ey,
+        // 이 값을 어느 응답에서 읽었는가. 표본이 새 응답인지 여기서 갈린다.
+        srcId: hits[i].id, srcAt: hits[i].at, srcSentAt: hits[i].sentAt || 0,
+        srcStatus: hits[i].status,
+        flights: rows
       };
     }
     return res;
@@ -331,15 +362,19 @@
     for (var i = hits.length - 1; i >= 0; i--) {
       if (/availab/i.test(hits[i].url) && hits[i].req) { src = hits[i]; break; }
     }
-    if (!src) return 'no-request';
+    if (!src) return { ok: false, why: 'no-request' };
     try {
       var init = { method: (src.req.method || 'GET').toUpperCase(),
                    credentials: 'include', headers: src.req.headers || {} };
       if (init.method !== 'GET' && init.method !== 'HEAD') init.body = src.req.body;
-      W.fetch(src.url, init);   // 응답은 fetch 래퍼가 알아서 기록한다
-      return 'sent';
+      /* 보낸 시각을 돌려준다. 계측기가 '보냄 -> 도착 -> 저장' 을 나눠 재려면
+       * 이 값이 있어야 한다. 예전엔 'sent' 라는 글자만 돌려줘서, 첫 표본이 늦은
+       * 구간이 우리 쪽인지 서버 쪽인지 가를 수 없었다. (09-08) */
+      var t0 = Date.now();
+      W.fetch(src.url, init);   // 응답은 fetch 래퍼가 알아서 기록한다 (sentAt 도 함께)
+      return { ok: true, sentAt: t0, fromId: src.id || 0 };
     } catch (e) {
-      return 'err:' + String(e).slice(0, 40);
+      return { ok: false, why: 'err:' + String(e).slice(0, 40) };
     }
   }
 
