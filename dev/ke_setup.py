@@ -106,6 +106,13 @@ def run_setup(cmd, deadline: datetime, log=print, gap: float = 3.0, min_tries: i
                 log("    | " + line.rstrip())
 
         if st.get("ok"):
+            # 성공해도 '무엇을 했는지' 는 남긴다. 로그인을 실제로 했는지, 어느 탭으로
+            # 들어갔는지가 안 보이면 내일 실전에서 계정이 맞았는지 알 수가 없다.
+            # 09-08 리허설에서 성공 로그가 통째로 버려져 추론으로 때워야 했다.
+            for line in out.splitlines():
+                s = line.strip()
+                if any(k in s for k in ("로그인", "로그인 탭", "선택된 탭", "달력 도착")):
+                    log("    | " + s)
             if n > 1:
                 log(f"  셋업 {n}회째에 성공")
             return st
