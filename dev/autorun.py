@@ -84,7 +84,11 @@ def main() -> int:
     ap.add_argument("--from", dest="origin", default="", help="출발지 코드 (유럽발이면 FCO/CDG)")
     ap.add_argument("--cabin", default="프레스티지")
     ap.add_argument("--date", default="", help="목표 날짜 MM-DD (비우면 검사 안 함)")
-    ap.add_argument("--dry", action="store_true", help="7단계(첫 주문) 앞에서 멈춘다")
+    ap.add_argument("--dry", action="store_true", help="7단계(첫 주문) 앞에서 멈춘다. 주문·hold 안 생김")
+    # 실전용. 7단계까지 밟아 좌석을 잡고(orderId/hold 생성) 멈춘다. 결제는 사람이 한다.
+    # --dry 와 달리 **실제로 좌석이 빠진다.** 버리면 hold 는 자동 해제된다(FACTS).
+    ap.add_argument("--hold", action="store_true",
+                    help="7단계까지 밟아 좌석을 선점하고 멈춘다 (결제는 사람이)")
     # 시작 화면. calendar = 달력에서 새로고침(검증됨), departure = 조회 화면에서 시작
     # (달력 한 장을 건너뛰어 앞단이 빨라질 수 있다는 가설. 실효를 재려고 넣었다).
     ap.add_argument("--start", default="calendar", choices=["calendar", "departure"])
@@ -93,9 +97,16 @@ def main() -> int:
     a = ap.parse_args()
 
     fire_at = target_time(a.at)
+    if a.dry and a.hold:
+        log("--dry 와 --hold 를 같이 줄 수 없다")
+        return finish(False, "--dry 와 --hold 동시 지정", 2)
+    mode = "dry(주문 안 만듦)" if a.dry else ("hold(좌석 선점, 결제 안 함)" if a.hold
+                                             else "full(결제까지)")
     report.update(startedAt=datetime.now(KST).isoformat(), fireAt=fire_at.isoformat(),
-                  route=a.route, cabin=a.cabin, date=a.date, dry=a.dry)
-    log(f"발사 예정 {fire_at.strftime('%H:%M:%S')} / 노선 {a.route or '(현재)'} / {a.cabin} / dry={a.dry}")
+                  route=a.route, cabin=a.cabin, date=a.date, dry=a.dry, hold=a.hold,
+                  mode=mode)
+    log(f"발사 예정 {fire_at.strftime('%H:%M:%S')} / 노선 {a.route or '(현재)'} / "
+        f"{a.cabin} / 모드 {mode}")
 
     if not ensure_browser():
         return finish(False, "브라우저를 띄우지 못함 (PC 가 켜져 있는지 확인)", 1)
@@ -131,19 +142,24 @@ def main() -> int:
         except Exception: pass
         page.evaluate(js)
 
-        page.evaluate("""({cabin, date, dry, start}) => {
+        page.evaluate("""({cabin, date, dry, hold, start}) => {
           const R = window.KE_REC, H = window.KE_HUD;
           R.pause('autorun'); R.state.playAfterReload = false;
           R.loadBaked();
-          if (dry) R.state.steps = R.state.steps.slice(0, 6);   // 7단계(첫 주문) 전까지
+          // dry  : 7단계(첫 주문) 전까지 - 주문도 hold 도 안 생긴다
+          // hold : 7단계까지 - 좌석을 실제로 잡고 멈춘다. 결제는 사람이 한다
+          // 둘 다 아니면 17단계 전부 (결제까지)
+          if (dry) R.state.steps = R.state.steps.slice(0, 6);
+          else if (hold) R.state.steps = R.state.steps.slice(0, 7);
           R.state.cabin = cabin;
           R.state.expectDate = date || '';
-          R.state.allowPay = !dry;
+          R.state.allowPay = !(dry || hold);
           R.state.byCause = {}; R.state.problem = false;
           R.reset(); R.save();
           H.state.startAt = start;
           H.state.armed = false;
-        }""", {"cabin": a.cabin, "date": a.date, "dry": a.dry, "start": a.start})
+        }""", {"cabin": a.cabin, "date": a.date, "dry": a.dry, "hold": a.hold,
+               "start": a.start})
 
         # 선발사: 오픈시각보다 lead 만큼 일찍 새로고침한다. 페이지가 뜨는 데 ~2.5초가
         # 걸려서, 08:59:57.5 에 쏘면 조회가 09:00:01 경 (오픈 직후) 도착해 재고침을 피한다.

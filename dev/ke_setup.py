@@ -59,10 +59,20 @@ def run_setup(cmd, deadline: datetime, log=print, gap: float = 3.0, min_tries: i
     """
     st, n = {}, 0
     while True:
+        # 마감을 넘겨서 **새 시도를 시작하지 않는다.** 예전엔 시도를 끝낸 뒤에야
+        # 시간을 봐서, 08:58 에 시작한 셋업이 420초를 붙잡고 09:00 을 넘길 수 있었다.
+        # 남은 시간보다 긴 timeout 도 주지 않는다. (리뷰 P1, 09-08)
+        left = (deadline - datetime.now(KST)).total_seconds()
+        if n >= min_tries and left <= 0:
+            log(f"  셋업 {n}회 - 마감을 넘겨 더 시도하지 않는다")
+            return st or {"ok": False, "why": "셋업 마감"}
+        # 마감이 이미 지난 채로 손으로 돌리는 경우(min_tries 미만)는 넉넉히 준다.
+        tmo = 420 if left <= 0 else max(30, min(420, int(left)))
+
         n += 1
         out = ""
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=420)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=tmo)
             out = (r.stdout or "")
             if r.stderr:
                 out += NL + "[stderr] " + r.stderr
@@ -95,10 +105,8 @@ def run_setup(cmd, deadline: datetime, log=print, gap: float = 3.0, min_tries: i
             log(f"  셋업 실패({why}) - 사람이 로그인해야 한다. 재시도 안 함")
             return st
 
+        # 다음 시도를 시작할지는 while 맨 위에서 마감으로 판단한다.
         left = (deadline - datetime.now(KST)).total_seconds()
-        if left <= 0 and n >= min_tries:
-            log(f"  셋업 {n}회 모두 실패({why}) - 마감")
-            return st
         log(f"  셋업 {n}회 실패({why}) - 다시 (마감까지 {max(left, 0):.0f}초)")
         if gap:
-            time.sleep(gap)
+            time.sleep(min(gap, max(left, 0)) if left > 0 else gap)

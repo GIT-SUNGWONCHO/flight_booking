@@ -191,27 +191,56 @@ def main() -> int:
     print(r.stdout[-3000:])
 
     # --- 3) 리포트로 판정한다. 로그에 오류가 없다는 것은 통과가 아니다 ---
+    #
+    # 예전 기준은 헐렁했다(리뷰 P1, 09-08):
+    #   - 계측기는 samples 만 있으면 ok=false 여도 통과시켰다
+    #   - 매크로는 idx>=2 면 실패 이유와 걸린 시간을 안 보고 통과시켰다
+    #   - 리포트가 빈 객체({})면 실패로도 안 세고 그냥 넘어갔다
+    # idx 는 '클릭이 어디까지 갔나' 일 뿐 조회가 성공했다는 증거가 아니다.
     fails, notes = [], []
 
-    w = {}
-    try: w = json.loads((OUT / "watch_seats.json").read_text(encoding="utf-8"))
-    except Exception: fails.append("계측기 리포트가 없다 - 아예 안 돌았다")
-    if w:
-        if not w.get("ok") and not w.get("samples"):
-            fails.append(f"계측기 실패: {w.get('why')}")
-        elif not w.get("samples"):
-            fails.append("계측기가 한 건도 측정하지 못했다")
-        else:
-            notes.append(f"계측기 {w.get('samples')}건 측정")
+    def load(fn, who):
+        try:
+            d = json.loads((OUT / fn).read_text(encoding="utf-8"))
+        except Exception:
+            fails.append(f"{who} 리포트가 없다 - 아예 안 돌았다")
+            return None
+        if not d:
+            fails.append(f"{who} 리포트가 비어 있다")
+            return None
+        # daily.py 가 실행 전에 지우므로, 남아 있다면 이번 실행 것이다.
+        return d
 
-    m = {}
-    try: m = json.loads((OUT / "autorun_report.json").read_text(encoding="utf-8"))
-    except Exception: fails.append("매크로 리포트가 없다 - 아예 안 돌았다")
-    if m:
-        if (m.get("idx") or 0) < 2:
-            fails.append(f"매크로가 발사하지 못했다 (idx={m.get('idx')}): {m.get('why')}")
+    w = load("watch_seats.json", "계측기")
+    if w:
+        n = w.get("samples") or 0
+        if not n:
+            fails.append(f"계측기가 한 건도 측정하지 못했다: {w.get('why') or '이유 없음'}")
+        elif not w.get("ok") and w.get("why"):
+            # 표본이 있어도 스스로 실패라고 말하면 실패다.
+            fails.append(f"계측기가 실패로 끝났다({n}건): {w.get('why')}")
         else:
-            notes.append(f"매크로 {m.get('idx')}단계 도달, {m.get('seconds')}초 / {(m.get('why') or '')[:60]}")
+            first = None
+            rows = w.get("rows") or []
+            if rows:
+                first = rows[0].get("sinceOpen")
+            notes.append(f"계측기 {n}건 측정" + (f", 첫 측정 오픈+{first}s" if first else ""))
+
+    m = load("autorun_report.json", "매크로")
+    if m:
+        idx = m.get("idx")
+        why = (m.get("why") or "")
+        if idx is None:
+            fails.append(f"매크로가 한 단계도 못 갔다: {why or '이유 없음'}")
+        elif idx < 2:
+            fails.append(f"매크로가 조회까지 못 갔다 (idx={idx}): {why}")
+        elif "시간 안에 끝나지 않음" in why or "준비 실패" in why:
+            # 여기까지 왔어도 이런 이유로 끝났으면 9시엔 진다.
+            fails.append(f"매크로가 {idx}단계에서 막혔다: {why[:80]}")
+        else:
+            notes.append(f"매크로 {idx}단계 도달, {m.get('seconds')}초 / {why[:60]}")
+            if m.get("mode"):
+                notes.append(f"매크로 모드: {m['mode']}")
 
     print()
     print("=" * 64)

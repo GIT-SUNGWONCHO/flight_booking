@@ -22,6 +22,9 @@ import argparse, json, subprocess, sys, time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ke_setup import nearest_future          # 날짜 계산은 저장소에 한 벌만 둔다
+
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "dev-shots"
 KST = timezone(timedelta(hours=9))
@@ -41,12 +44,15 @@ def popup(title: str, body: str):
         0, body, title, 0x30), daemon=True).start()
 
 
-def ready_checkpoint(hhmm: str, ports: list):
-    """약속한 시각에 '정말로 발사할 수 있는 상태인가' 를 눈으로 확인한다.
+def ready_checkpoint(hhmm: str, ports: list, procs: dict = None, want_date: str = ""):
+    """약속한 시각에 '정말로 발사할 수 있는 상태인가' 를 확인한다.
 
     09-04 에 두 크롬이 현금 달력(/booking/calendar-fare)에 서 있었는데 아무도
     몰랐다. 프로세스는 이미 죽어 있었고 로그는 09:01 에야 나왔다.
-    보너스 달력(calendar-fare-bonus)이 아니면 그 자리에서 사람을 부른다.
+
+    **화면만 보면 안 된다.** 매크로가 죽어도 달력은 그대로 남아 있어서 통과한다.
+    프로세스가 살아 있는지, 로그인돼 있는지, 목표 달을 그리고 있는지 같이 본다.
+    (리뷰 P1, 09-08)
     """
     now = datetime.now(KST)
     h, m = (hhmm.split(":") + ["0"])[:2]
@@ -55,20 +61,59 @@ def ready_checkpoint(hhmm: str, ports: list):
         log(f"{t.strftime('%H:%M')} 준비 확인까지 대기")
         time.sleep((t - now).total_seconds())
     bad = []
+
+    # 1) 프로세스가 살아 있나. 죽었으면 화면이 멀쩡해도 9시에 아무 일도 안 일어난다.
+    for name, p in (procs or {}).items():
+        if p.poll() is not None:
+            bad.append(f"{name} 프로세스가 이미 끝났다 (코드 {p.returncode})")
+            log(f"  준비확인 {name}: X 죽어 있음 (코드 {p.returncode})")
+        else:
+            log(f"  준비확인 {name}: 살아 있음")
+
+    # 2) 화면 - 보너스 달력인가 / 로그인돼 있나 / 목표 달을 그리는가
+    ym = ""
+    if want_date:
+        try:
+            ym = nearest_future(want_date).strftime("%Y%m")
+        except Exception:
+            ym = ""
     try:
         from playwright.sync_api import sync_playwright
+        USER = ROOT / "userscript" / "ke-award-macro.user.js"
         for port in ports:
+            info, url = {}, ""
             try:
                 with sync_playwright() as pw:
                     b = sync_cdp(pw, port)
-                    url = b.contexts[0].pages[-1].url if b.contexts[0].pages else ""
+                    pages = b.contexts[0].pages
+                    page = pages[-1] if pages else None
+                    if page:
+                        url = page.url
+                        try:
+                            page.evaluate(USER.read_text(encoding="utf-8"))
+                            info = page.evaluate("""() => {
+                              const U = window.KE_UTIL;
+                              const lab = U.candidates(document).filter(e => U.visible(e))
+                                .map(e => U.label(e)).filter(Boolean);
+                              return {
+                                loggedIn: lab.some(t => /로그아웃/.test(t)),
+                                months: [...document.querySelectorAll('[id^=month]')].map(e => e.id)
+                              };
+                            }""")
+                        except Exception:
+                            info = {}
                     b.close()
             except Exception as e:
                 url = f"(붙지 못함: {str(e)[:40]})"
-            ok = "calendar-fare-bonus" in url
-            log(f"  준비확인 {port}: {'OK' if ok else 'X'}  {url[:70]}")
-            if not ok:
-                bad.append(f"{port}: {url[:70]}")
+            probs = []
+            if "calendar-fare-bonus" not in url:
+                probs.append(f"마일리지 달력이 아님: {url[:60]}")
+            if info and not info.get("loggedIn"):
+                probs.append("로그아웃 상태")
+            if ym and info.get("months") and f"month{ym}" not in info["months"]:
+                probs.append(f"목표 달(month{ym})을 안 그림: {info['months']}")
+            log(f"  준비확인 {port}: {'OK' if not probs else 'X ' + ' / '.join(probs)}")
+            bad += [f"{port}: {p}" for p in probs]
     except Exception as e:
         bad.append(f"확인 자체가 실패: {str(e)[:60]}")
     if bad:
@@ -86,6 +131,17 @@ def sync_cdp(pw, port: int):
     return pw.chromium.connect_over_cdp(f"http://localhost:{port}")
 
 
+def spawn(name: str, cmd: list):
+    """자식을 띄우고 출력을 파일로 받는다.
+
+    PIPE 로 받아 두고 communicate 를 늦게 부르면 파이프 버퍼가 차서 자식이 멈춘다.
+    ready_checkpoint 가 08:50 까지 기다리는 동안 그럴 수 있었다. (리뷰 P1, 09-08)
+    """
+    OUT.mkdir(exist_ok=True)
+    f = (OUT / f"{name}.out").open("w", encoding="utf-8", errors="replace")
+    return subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--at", default="09:00")
@@ -100,9 +156,15 @@ def main() -> int:
     # 이미 열린 최신일을 넣어 파이프라인만 확인한다.
     ap.add_argument("--date", default="", help="MM-DD 강제 (비우면 오늘+360)")
     ap.add_argument("--ready-by", default="", help="이 시각에 두 크롬이 보너스 달력에 서 있는지 확인 (HH:MM)")
+    # 매크로를 어디까지 돌릴지. 기본은 dry - 실전은 사람이 명시해야만 온다.
+    #   dry  7단계 앞에서 정지. 주문도 hold 도 안 생긴다 (연습 기본값)
+    #   hold 7단계까지. 좌석을 실제로 잡고 멈춘다. 결제는 사람이 (09-09 실전)
+    #   full 17단계 전부. 결제까지 한다
+    ap.add_argument("--mode", default="dry", choices=["dry", "hold", "full"])
     a = ap.parse_args()
 
-    today = datetime.now(KST).date()
+    started = datetime.now(KST)
+    today = started.date()
     opens = today + timedelta(days=OFFSET)
     rome_ok = opens.weekday() in ROME_DAYS
 
@@ -120,6 +182,17 @@ def main() -> int:
         f"{opens}({WD[opens.weekday()]})  로마운항={'O' if rome_ok else 'X'}")
     log(f"측정 노선: {origin or 'SEL'} -> {route}  (출발일 {mmdd})")
 
+    # 결과 파일 이름이 고정이라 옛 실행 것이 남아 있다. 지우고 시작해 '이번 실행에
+    # 결과가 없다' 와 '어제 결과가 남아 있다' 를 구별한다. (리뷰 P1, 09-08)
+    OUT.mkdir(exist_ok=True)
+    for f in ("watch_seats.json", "autorun_report.json"):
+        try:
+            (OUT / f).unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
     procs = {}
     if not a.no_watch:
         cmd = [sys.executable, str(ROOT / "dev" / "watch_seats.py"),
@@ -127,43 +200,72 @@ def main() -> int:
                "--port", str(a.port2), "--setup-at", a.setup_at]
         if origin:
             cmd += ["--from", origin]
-        procs["watch"] = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                          stderr=subprocess.STDOUT, text=True)
+        procs["watch"] = spawn("watch", cmd)
         log("계측기 시작 (2번 크롬)")
     if not a.no_macro:
         cmd = [sys.executable, str(ROOT / "dev" / "autorun.py"),
-               "--route", route, "--date", mmdd, "--at", a.at, "--dry"]
+               "--route", route, "--date", mmdd, "--at", a.at]
+        if a.mode == "dry":
+            cmd += ["--dry"]
+        elif a.mode == "hold":
+            cmd += ["--hold"]
+        # mode == "full" 이면 아무것도 안 붙인다 (결제까지). 사람이 명시해야만 온다.
         if origin:
             cmd += ["--from", origin]
-        procs["macro"] = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                          stderr=subprocess.STDOUT, text=True)
-        log("dry 매크로 시작 (1번 크롬, 주문 안 만듦)")
+        procs["macro"] = spawn("macro", cmd)
+        log(f"매크로 시작 (1번 크롬, 모드 {a.mode})")
 
     if a.ready_by:
-        ready_checkpoint(a.ready_by, [9222, a.port2])
+        watched = [p for p, use in ((9222, not a.no_macro), (a.port2, not a.no_watch)) if use]
+        ready_checkpoint(a.ready_by, watched, procs, mmdd)
 
-    outs = {}
+    # 자식 출력은 파일로 받는다. PIPE 로 받고 communicate 를 늦게 부르면 버퍼가
+    # 차서 **자식이 멈춘다**. ready_checkpoint 가 08:50 까지 기다리는 동안 그럴 수
+    # 있었다. (리뷰 P1, 09-08)
+    outs, failed = {}, []
     for name, p in procs.items():
-        outs[name] = (p.communicate()[0] or "")[-1500:]
-        log(f"{name} 종료 (코드 {p.returncode})")
+        p.wait()
+        f = OUT / f"{name}.out"
+        try:
+            outs[name] = f.read_text(encoding="utf-8", errors="replace")[-1500:]
+        except Exception:
+            outs[name] = ""
+        log(f"{name} 종료 (코드 {p.returncode})  로그: {f}")
+        if p.returncode != 0:
+            failed.append(f"{name}({p.returncode})")
 
     # 두 결과를 한 줄로 합쳐 쌓는다
     summary = {"day": str(today), "opens": str(opens), "weekday": WD[opens.weekday()],
-               "route": route, "origin": origin or "SEL"}
-    try:
-        w = json.loads((OUT / "watch_seats.json").read_text(encoding="utf-8"))
+               "route": route, "origin": origin or "SEL", "mode": a.mode,
+               "runStartedAt": started.isoformat()}
+
+    # 결과 파일 이름이 고정이라 **이번 실행에서 안 쓴 옛 파일을 읽을 수 있다.**
+    # 시작 시각을 대조해 이번 실행 것이 아니면 안 쓴다. (리뷰 P1, 09-08)
+    def fresh(fn: str):
+        try:
+            d = json.loads((OUT / fn).read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        try:
+            if datetime.fromisoformat(d.get("startedAt", "")) < started:
+                summary.setdefault("stale", []).append(fn)
+                return None
+        except Exception:
+            return None
+        return d
+
+    w = fresh("watch_seats.json")
+    if w:
         summary["prestigeSeats"] = w.get("maxPrestigeSeats")
         summary["goneSinceOpen"] = w.get("goneSinceOpen")
         summary["samples"] = w.get("samples")
-    except Exception:
-        pass
-    try:
-        m = json.loads((OUT / "autorun_report.json").read_text(encoding="utf-8"))
+    m = fresh("autorun_report.json")
+    if m:
         summary["macroIdx"] = m.get("idx")
         summary["macroSeconds"] = m.get("seconds")
         summary["macroWhy"] = (m.get("why") or "")[:120]
-    except Exception:
-        pass
+    if failed:
+        summary["failed"] = failed
 
     (OUT).mkdir(exist_ok=True)
     with (OUT / "daily_history.jsonl").open("a", encoding="utf-8") as f:
@@ -171,6 +273,11 @@ def main() -> int:
     log("요약: " + json.dumps(summary, ensure_ascii=False))
     for name, o in outs.items():
         print(f"--- {name} ---\n{o}")
+    # 자식이 실패했으면 그대로 알린다. 예전엔 무조건 0 을 돌려줘서 스케줄러가
+    # 성공으로 기록했다. (리뷰 P1, 09-08)
+    if failed:
+        log("실패한 자식: " + ", ".join(failed))
+        return 1
     return 0
 
 

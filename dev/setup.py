@@ -278,10 +278,24 @@ def main() -> int:
             # 세션이 만료됐으면 네이버 연동으로 다시 들어간다. 네이버 쪽 세션이 살아
             # 있으면 버튼 두 번으로 끝난다 - 비밀번호를 치는 게 아니다.
             # 비밀번호 입력칸이 뜨면 거기서 멈춘다. 그건 사람이 해야 한다.
-            # 어느 방법으로 들어갈지: 실전(9222)은 와이프 스카이패스 아이디/비밀번호,
-            # 계측(9223)은 본인 네이버 연동. .env 에 값이 있어야 아이디/비밀번호를 쓴다.
+            # 계정은 **포트로 못박는다.** 9222 는 와이프 스카이패스, 9223 은 본인 네이버.
+            #
+            # 예전엔 `.env 에 값이 있으면` 스카이패스를 썼다. 값이 비어 있으면 조용히
+            # 네이버로 넘어가 **9222 에 본인 계정으로 로그인**된다 - 실전이면 엉뚱한
+            # 계정의 마일리지로 예약을 시도하게 된다. (리뷰 P1, 09-08)
             env = load_env()
-            use_idpw = ("9222" in cdp) and env.get("KE_SKYPASS_ID") and env.get("KE_SKYPASS_PW")
+            is_live = "9222" in cdp
+            if is_live:
+                if not (env.get("KE_SKYPASS_ID") and env.get("KE_SKYPASS_PW")):
+                    log("9222(실전)인데 .env 에 스카이패스 정보가 없다 - 네이버로 넘어가지 않는다")
+                    print(json.dumps({"ok": False, "url": page.url,
+                                      "why": "로그인 필요: .env 의 KE_SKYPASS_ID/PW 가 비어 있음"},
+                                     ensure_ascii=False))
+                    return 2
+                use_idpw = True
+            else:
+                use_idpw = False    # 9223 계측은 항상 네이버 연동
+
             if use_idpw:
                 log("로그아웃 상태 - 스카이패스 아이디/비밀번호로 로그인 시도 (.env)")
                 did_login = True
