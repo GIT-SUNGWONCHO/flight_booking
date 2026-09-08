@@ -20,7 +20,7 @@ from ke_setup import nearest_future, run_setup
 ROOT = Path(__file__).resolve().parent.parent
 USER = ROOT / "userscript" / "ke-award-macro.user.js"
 OUT = ROOT / "dev-shots"
-CDP = "http://localhost:9222"
+CDP = "http://localhost:9222"      # --port 로 바뀐다 (계측·시험은 9223)
 CAL = "/booking/calendar-fare-bonus"
 KST = timezone(timedelta(hours=9))
 
@@ -83,27 +83,40 @@ def main() -> int:
     # 유럽발(로마->인천 등). 9/9 목표가 FCO->ICN 이라 필요하다. setup 으로 넘긴다.
     ap.add_argument("--from", dest="origin", default="", help="출발지 코드 (유럽발이면 FCO/CDG)")
     ap.add_argument("--cabin", default="프레스티지")
+    # 어느 크롬에 붙을지. 9222=실전(와이프 스카이패스), 9223=계측·시험(본인).
+    # 마일리지를 실제로 쓰는 시험은 본인 계정(9223)에서 해야 한다.
+    ap.add_argument("--port", type=int, default=9222)
     ap.add_argument("--date", default="", help="목표 날짜 MM-DD (비우면 검사 안 함)")
     ap.add_argument("--dry", action="store_true", help="7단계(첫 주문) 앞에서 멈춘다. 주문·hold 안 생김")
     # 실전용. 7단계까지 밟아 좌석을 잡고(orderId/hold 생성) 멈춘다. 결제는 사람이 한다.
     # --dry 와 달리 **실제로 좌석이 빠진다.** 버리면 hold 는 자동 해제된다(FACTS).
     ap.add_argument("--hold", action="store_true",
                     help="7단계까지 밟아 좌석을 선점하고 멈춘다 (결제는 사람이)")
+    # 17단계 전부. 마지막 '결제하기' 까지 눌러 **결제창을 연다.**
+    # 결제창 안에서 카드를 넣어야 실제로 결제되므로 여기까지는 돈이 안 나간다 -
+    # 예전부터 시험은 여기까지였다. HUD 의 '결제하기까지 자동 (결제창 열림)' 과 같다.
+    # 3~17단계를 검증하는 유일한 방법이다 - 좌석이 남는 일반석으로 돌린다.
+    # 다만 7단계에서 hold 는 생긴다(버리면 자동 해제).
+    ap.add_argument("--to-pay", dest="to_pay", action="store_true",
+                    help="결제창을 여는 데까지 (17단계 전부). 실제 결제는 사람이")
     # 시작 화면. calendar = 달력에서 새로고침(검증됨), departure = 조회 화면에서 시작
     # (달력 한 장을 건너뛰어 앞단이 빨라질 수 있다는 가설. 실효를 재려고 넣었다).
     ap.add_argument("--start", default="calendar", choices=["calendar", "departure"])
     ap.add_argument("--lead", type=int, default=2500,
                     help="선발사(ms). 오픈시각보다 이만큼 일찍 새로고침해 조회가 09:00 직후 도착하게 한다")
     a = ap.parse_args()
+    global CDP
+    CDP = f"http://localhost:{a.port}"
 
     fire_at = target_time(a.at)
-    if a.dry and a.hold:
-        log("--dry 와 --hold 를 같이 줄 수 없다")
-        return finish(False, "--dry 와 --hold 동시 지정", 2)
-    mode = "dry(주문 안 만듦)" if a.dry else ("hold(좌석 선점, 결제 안 함)" if a.hold
-                                             else "full(결제까지)")
+    if sum([a.dry, a.hold, a.to_pay]) > 1:
+        log("--dry / --hold / --to-pay 는 하나만 준다")
+        return finish(False, "모드 플래그 중복", 2)
+    mode = ("dry(주문 안 만듦)" if a.dry else
+            "hold(좌석 선점, 결제창 안 엶)" if a.hold else
+            "to-pay(결제창 열기까지 - 실제 결제는 사람이)")
     report.update(startedAt=datetime.now(KST).isoformat(), fireAt=fire_at.isoformat(),
-                  route=a.route, cabin=a.cabin, date=a.date, dry=a.dry, hold=a.hold,
+                  route=a.route, cabin=a.cabin, date=a.date, dry=a.dry, hold=a.hold, toPay=a.to_pay,
                   mode=mode)
     log(f"발사 예정 {fire_at.strftime('%H:%M:%S')} / 노선 {a.route or '(현재)'} / "
         f"{a.cabin} / 모드 {mode}")
@@ -114,7 +127,8 @@ def main() -> int:
     # --- 준비: 달력까지 ---
     # 목표 날짜의 '월' 로 달력을 옮겨야 그 날짜가 보인다. setup 은 YYYY-MM-DD 를 받는다.
     # 마일리지는 ~1년 뒤를 열므로, 목표 월이 이번 달보다 이르면 내년으로 본다.
-    setup_cmd = [sys.executable, str(ROOT / "dev" / "setup.py")] + ([a.route] if a.route else [])
+    setup_cmd = ([sys.executable, str(ROOT / "dev" / "setup.py")]
+                 + ([a.route] if a.route else []) + ["--port", str(a.port)])
     if a.origin:
         setup_cmd += ["--from", a.origin]
     if a.start == "departure":
@@ -142,13 +156,16 @@ def main() -> int:
         except Exception: pass
         page.evaluate(js)
 
-        page.evaluate("""({cabin, date, dry, hold, start}) => {
+        page.evaluate("""({cabin, date, dry, hold, toPay, start}) => {
           const R = window.KE_REC, H = window.KE_HUD;
           R.pause('autorun'); R.state.playAfterReload = false;
           R.loadBaked();
-          // dry  : 7단계(첫 주문) 전까지 - 주문도 hold 도 안 생긴다
-          // hold : 7단계까지 - 좌석을 실제로 잡고 멈춘다. 결제는 사람이 한다
-          // 둘 다 아니면 17단계 전부 (결제까지)
+          // dry   : 0~5  7단계(첫 주문) 전까지 - 주문도 hold 도 안 생긴다
+          // hold  : 0~6  7단계까지 - 좌석을 실제로 잡고 멈춘다
+          // toPay : 전부 - 마지막 '결제하기' 까지 눌러 **결제창을 연다**.
+          //         결제창 안에서 카드를 넣어야 결제되므로 돈은 안 나간다.
+          //         엔진은 allowPay=false 면 결제 단계에서 스스로 멈춘다(recorder.js).
+          //         그래서 여기서 자르지 않는다 - 자르면 16단계를 아예 안 밟는다.
           if (dry) R.state.steps = R.state.steps.slice(0, 6);
           else if (hold) R.state.steps = R.state.steps.slice(0, 7);
           R.state.cabin = cabin;
@@ -159,7 +176,7 @@ def main() -> int:
           H.state.startAt = start;
           H.state.armed = false;
         }""", {"cabin": a.cabin, "date": a.date, "dry": a.dry, "hold": a.hold,
-               "start": a.start})
+               "toPay": a.to_pay, "start": a.start})
 
         # 선발사: 오픈시각보다 lead 만큼 일찍 새로고침한다. 페이지가 뜨는 데 ~2.5초가
         # 걸려서, 08:59:57.5 에 쏘면 조회가 09:00:01 경 (오픈 직후) 도착해 재고침을 피한다.

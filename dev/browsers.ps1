@@ -44,13 +44,11 @@ function Alive([int]$port) {
   } catch { return $false }
 }
 
-foreach ($t in $targets) {
-  if (Alive $t.Port) {
-    Write-Output "$($t.Name) 크롬 이미 떠 있음 (포트 $($t.Port))"
-    continue
-  }
+function Launch($t) {
   $dir = Join-Path $root $t.Profile
-  $label = "KE $($t.Port) $($t.Name)"      # 예: "KE 9223 계측용"
+  # 말머리를 'Claude:' 로 둔다. 브라우저를 봤을 때 이 자동화가 띄운 창인지
+  # 사람이 띄운 창인지, 다른 작업자 것인지 바로 갈리게. (09-08 사용자 요청)
+  $label = "Claude:$($t.Port) $($t.Name)"   # 예: "Claude:9223 계측용"
   Set-ProfileName $dir $label
   Start-Process -FilePath $chrome -ArgumentList `
     "--remote-debugging-port=$($t.Port)", `
@@ -66,12 +64,22 @@ foreach ($t in $targets) {
   Write-Output "$($t.Name) 크롬 띄움 (포트 $($t.Port), 프로필이름 '$label', 창 $($t.Pos))"
 }
 
-# 8초 고정 대기로는 부족할 때가 있다. 실제로 답할 때까지 최대 30초 기다린다.
+# 죽인 직후에는 프로필이 아직 안 풀려 크롬이 **조용히 죽는다**. 로그에는
+# '띄움' 이라고 찍히고 포트는 끝내 안 열린다. 09-08 에 실제로 그랬다.
+# 한 번 더 띄워 본다 - 두 번째는 됐다.
 foreach ($t in $targets) {
-  $ok = $false
-  for ($i = 0; $i -lt 30; $i++) {
-    if (Alive $t.Port) { $ok = $true; break }
-    Start-Sleep -Seconds 1
+  if (Alive $t.Port) {
+    Write-Output "$($t.Name) 크롬 이미 떠 있음 (포트 $($t.Port))"
+    continue
   }
-  Write-Output ("포트 $($t.Port): " + $(if ($ok) { "OK" } else { "안 올라옴 (30초 기다림)" }))
+  $ok = $false
+  for ($try = 1; $try -le 3 -and -not $ok; $try++) {
+    if ($try -gt 1) { Write-Output "  ($($t.Port)) $try 번째 시도"; Start-Sleep -Seconds 4 }
+    Launch $t
+    for ($i = 0; $i -lt 25; $i++) {
+      if (Alive $t.Port) { $ok = $true; break }
+      Start-Sleep -Seconds 1
+    }
+  }
+  Write-Output ("포트 $($t.Port): " + $(if ($ok) { "OK" } else { "안 올라옴 (3번 시도)" }))
 }

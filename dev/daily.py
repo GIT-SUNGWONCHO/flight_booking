@@ -161,6 +161,10 @@ def main() -> int:
     #   hold 7단계까지. 좌석을 실제로 잡고 멈춘다. 결제는 사람이 (09-09 실전)
     #   full 17단계 전부. 결제까지 한다
     ap.add_argument("--mode", default="dry", choices=["dry", "hold", "full"])
+    # 좌석 등급. 실전은 프레스티지지만, 3~17단계(결제까지)를 밟아 보려면 좌석이
+    # 남아 있는 일반석이어야 한다 - 프레스티지는 이미 열린 날짜엔 늘 매진이라
+    # 매크로가 2단계에서 멈춘다.
+    ap.add_argument("--cabin", default="프레스티지")
     # 실전 모드를 오늘이 목표일이 아닐 때 쓰려면 이걸 같이 줘야 한다.
     # day.ps1 에 hold 를 적어 두고 다음날 지우는 것을 잊으면 **연습일에 주문이 생긴다.**
     ap.add_argument("--force-live", action="store_true",
@@ -219,7 +223,7 @@ def main() -> int:
         log("계측기 시작 (2번 크롬)")
     if not a.no_macro:
         cmd = [sys.executable, str(ROOT / "dev" / "autorun.py"),
-               "--route", route, "--date", mmdd, "--at", a.at]
+               "--route", route, "--date", mmdd, "--at", a.at, "--cabin", a.cabin]
         if a.mode == "dry":
             cmd += ["--dry"]
         elif a.mode == "hold":
