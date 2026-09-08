@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ke_setup import nearest_future          # 날짜 계산은 저장소에 한 벌만 둔다
+from ke_setup import TARGETS, nearest_future   # 날짜 계산·목표일은 저장소에 한 벌만 둔다
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "dev-shots"
@@ -161,10 +161,25 @@ def main() -> int:
     #   hold 7단계까지. 좌석을 실제로 잡고 멈춘다. 결제는 사람이 (09-09 실전)
     #   full 17단계 전부. 결제까지 한다
     ap.add_argument("--mode", default="dry", choices=["dry", "hold", "full"])
+    # 실전 모드를 오늘이 목표일이 아닐 때 쓰려면 이걸 같이 줘야 한다.
+    # day.ps1 에 hold 를 적어 두고 다음날 지우는 것을 잊으면 **연습일에 주문이 생긴다.**
+    ap.add_argument("--force-live", action="store_true",
+                    help="목표일이 아닌 날에도 hold/full 을 허용한다")
     a = ap.parse_args()
 
     started = datetime.now(KST)
     today = started.date()
+
+    # 실전 모드는 목표일에만. day.ps1 에 hold 를 적어 두고 다음날 지우는 것을 잊으면
+    # 연습일에 실제 주문이 생긴다 - 마일리지가 실제로 빠져나간다. 날짜로 잠근다.
+    if a.mode != "dry" and today not in TARGETS and not a.force_live:
+        log(f"오늘({today})은 실전 목표일이 아닌데 --mode {a.mode} 다. dry 로 내린다.")
+        log(f"  목표일: {', '.join(str(d) for d in sorted(TARGETS))}")
+        log("  정말 실전으로 쏘려면 --force-live 를 같이 준다.")
+        a.mode = "dry"
+    elif a.mode != "dry":
+        why = "목표일" if today in TARGETS else "--force-live 로 강제"
+        log(f"*** 실전 모드 {a.mode} ({why}) - 좌석을 실제로 잡는다 ***")
     opens = today + timedelta(days=OFFSET)
     rome_ok = opens.weekday() in ROME_DAYS
 

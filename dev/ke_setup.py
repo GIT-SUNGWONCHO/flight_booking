@@ -27,6 +27,16 @@ LOGDIR = Path(__file__).resolve().parent.parent / "dev-shots"
 NL = "\n"
 
 
+# 실전 목표. **실행일 기준**이다(출발일이 아니다). 여기 한 곳에만 둔다 -
+# calendar_md.py 와 daily.py 의 안전장치가 같은 표를 본다.
+#   실행일: (출발지, 도착지, 표기)
+TARGETS = {
+    date(2026, 9, 9):  ("FCO", "ICN", "로마 → 인천"),
+    date(2026, 9, 14): ("",    "CDG", "인천 → 파리"),
+    date(2026, 9, 25): ("CDG", "ICN", "파리 → 인천"),
+}
+
+
 def nearest_future(mmdd: str) -> date:
     """MM-DD 를 '앞으로 올 그 날짜' 로 읽는다.
 

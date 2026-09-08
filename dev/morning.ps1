@@ -114,8 +114,11 @@ if ($skipped) {
 if ($NoDaily) {
   Say "(-NoDaily) 실전 셋팅은 건너뜀 - 리허설만 확인"
 } else {
-  Say ("실전 셋팅 시작 (" + ($DailyArgs -join ' ') + ") - 08:50 준비 확인, 08:59:57.5 발사")
-  & $py (Join-Path $PSScriptRoot "daily.py") @DailyArgs --ready-by 08:50 2>&1 |
+  # $Mode 는 day.ps1 에서 온다. 실전(hold)은 목표일에만 - daily.py 가 날짜로 잠근다.
+  if (-not $Mode) { $Mode = 'dry' }
+  Say ("실전 셋팅 시작 (" + ($DailyArgs -join ' ') + " / 모드 $Mode) - 08:50 준비 확인, 08:59:57.5 발사")
+  if ($Mode -ne 'dry') { Say "*** 오늘은 실전 모드 '$Mode' 다. 좌석을 실제로 잡는다. ***" }
+  & $py (Join-Path $PSScriptRoot "daily.py") @DailyArgs --mode $Mode --ready-by 08:50 2>&1 |
     ForEach-Object { Say "  $_" }
 }
 Say "=== 아침 끝 (결과는 dev-shots 참고) ==="

@@ -8,7 +8,7 @@
     .venv/Scripts/python.exe dev/calendar_md.py --days 30
 """
 from __future__ import annotations
-import argparse
+import argparse, sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,12 +18,8 @@ OFFSET = 360
 ROME_DAYS = {0, 2, 5}          # 월·수·토
 WD = "월화수목금토일"
 
-# 실전 목표. **실행일 기준**이다(출발일이 아니다).
-TARGETS = {
-    date(2026, 9, 9):  ("FCO", "ICN", "로마 → 인천"),
-    date(2026, 9, 14): ("",    "CDG", "인천 → 파리"),
-    date(2026, 9, 25): ("CDG", "ICN", "파리 → 인천"),
-}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ke_setup import TARGETS      # 실전 목표는 ke_setup 한 곳에만 둔다
 
 
 def where(run_day: date) -> str:
